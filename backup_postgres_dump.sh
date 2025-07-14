@@ -6,8 +6,10 @@ set -euo pipefail
 #
 # Description:
 #   - Dumps all PostgreSQL databases using pg_dumpall
-#   - Compresses the SQL file (.gz)
-#   - Uploads it to Google Drive using rclone (preserves older files)
+#   - Saves the SQL file (.sql) temporarily
+#   - Compresses the SQL file using pigz (.gz)
+#   - Deletes the .sql file after successful compression
+#   - Uploads to Google Drive using rclone
 #   - Deletes local .gz to save space
 #   - Cleans up remote backups older than 30 days
 #
@@ -19,12 +21,13 @@ set -euo pipefail
 #   0 2 * * 0 /bin/bash /home/youruser/ida-scripts/backup_postgres.sh
 #
 # Sudoers requirement (via `sudo visudo`):
-#   This script requires passwordless sudo access to run pg_dumpall:
-#
-#     youruser ALL=(postgres) NOPASSWD: /usr/bin/pg_dumpall
+#  This script requires passwordless sudo access to run pg_dumpall:
+#   youruser ALL=(postgres) NOPASSWD: /usr/bin/pg_dumpall
 #
 # Requirements:
 #   - pg_dumpall
+#   - pv
+#   - pigz
 #   - rclone (configured, e.g. to googledrive:postgres_backup)
 # -------------------------------------------------------------------
 
@@ -32,8 +35,9 @@ POSTGRES_USER="${1:-postgres}"
 
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 BACKUP_DIR="$HOME/postgres_backup"
-BACKUP_SQL="$BACKUP_DIR/all_databases_${TIMESTAMP}.sql"
-BACKUP_GZ="${BACKUP_SQL}.gz"
+DUMP_NAME="all_databases_${TIMESTAMP}.sql"
+DUMP_PATH="$BACKUP_DIR/$DUMP_NAME"
+GZ_PATH="${DUMP_PATH}.gz"
 LOGFILE="$HOME/backup_log.txt"
 RCLONE_REMOTE="googledrive:postgres_backup"
 LOG_MAX_MB=10
@@ -45,27 +49,31 @@ if [ -f "$LOGFILE" ] && [ "$(stat -c%s "$LOGFILE")" -gt $(("$LOG_MAX_MB" * 1024 
     tail -c "${LOG_MAX_MB}M" "$LOGFILE" > "${LOGFILE}.tmp" && mv "${LOGFILE}.tmp" "$LOGFILE"
 fi
 
-
 {
     echo "[$(date)] Starting PostgreSQL backup as user '$POSTGRES_USER'"
 
-    # Step 1: Dump
-    sudo -u "$POSTGRES_USER" /usr/bin/pg_dumpall > "$BACKUP_SQL"
-    echo "[$(date)] Backup completed: $BACKUP_SQL"
+    # Step 1: Dump to .sql
+    sudo -u "$POSTGRES_USER" /usr/bin/pg_dumpall > "$DUMP_PATH"
+    echo "[$(date)] Database dump completed: $DUMP_PATH"
 
-    # Step 2: Compress
-    gzip "$BACKUP_SQL"
-    echo "[$(date)] Compression completed: $BACKUP_GZ"
+    # Step 2: Compress with pigz and log pv progress
+    echo "[$(date)] Starting compression..."
+    ionice -c2 -n7 nice -n19 pv -i 60 "$DUMP_PATH" 2>> "$LOGFILE" | pigz -6 > "$GZ_PATH"
+    echo "[$(date)] Compression completed: $GZ_PATH"
 
-    # Step 3: Upload to cloud (safe copy only)
-    /usr/bin/rclone copy "$BACKUP_GZ" "$RCLONE_REMOTE"
-    echo "[$(date)] Rclone copy completed to $RCLONE_REMOTE"
+    # Step 3: Delete original .sql after successful compression
+    rm "$DUMP_PATH"
+    echo "[$(date)] Original SQL file deleted: $DUMP_PATH"
 
-    # Step 4: Delete local file
-    rm "$BACKUP_GZ"
-    echo "[$(date)] Local backup file deleted: $BACKUP_GZ"
+    # Step 4: Upload to cloud
+    /usr/bin/rclone copy "$GZ_PATH" "$RCLONE_REMOTE"
+    echo "[$(date)] Rclone upload completed: $RCLONE_REMOTE"
 
-    # Step 5: Remote retention — delete backups older than 30 days
+    # Step 5: Delete local compressed file
+    rm "$GZ_PATH"
+    echo "[$(date)] Local .gz file deleted: $GZ_PATH"
+
+    # Step 6: Delete remote files older than 30 days
     /usr/bin/rclone delete --min-age 30d "$RCLONE_REMOTE"
     echo "[$(date)] Remote retention cleanup completed (older than 30 days)"
 
