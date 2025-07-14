@@ -58,7 +58,7 @@ fi
 
     # Step 2: Compress with pigz and log pv progress
     echo "[$(date)] Starting compression..."
-    ionice -c2 -n7 nice -n19 pv -i 60 "$DUMP_PATH" 2>> "$LOGFILE" | pigz -6 > "$GZ_PATH"
+    ionice -c2 -n7 nice -n19 pv --force -i 60 "$DUMP_PATH" | pigz -6 > "$GZ_PATH"
     echo "[$(date)] Compression completed: $GZ_PATH"
 
     # Step 3: Delete original .sql after successful compression
