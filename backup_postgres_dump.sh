@@ -66,7 +66,7 @@ fi
     echo "[$(date)] Original SQL file deleted: $DUMP_PATH"
 
     # Step 4: Upload to cloud
-    /usr/bin/rclone copy "$GZ_PATH" "$RCLONE_REMOTE"
+    /usr/bin/rclone copy -v --progress "$GZ_PATH" "$RCLONE_REMOTE"
     echo "[$(date)] Rclone upload completed: $RCLONE_REMOTE"
 
     # Step 5: Delete local compressed file
