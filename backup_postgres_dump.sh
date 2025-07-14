@@ -36,8 +36,15 @@ BACKUP_SQL="$BACKUP_DIR/all_databases_${TIMESTAMP}.sql"
 BACKUP_GZ="${BACKUP_SQL}.gz"
 LOGFILE="$HOME/backup_log.txt"
 RCLONE_REMOTE="googledrive:postgres_backup"
+LOG_MAX_MB=10
 
 mkdir -p "$BACKUP_DIR"
+
+# Truncate the log file if it's larger than $LOG_MAX_MB MB
+if [ -f "$LOGFILE" ] && [ "$(stat -c%s "$LOGFILE")" -gt $(("$LOG_MAX_MB" * 1024 * 1024)) ]; then
+    tail -c "${LOG_MAX_MB}M" "$LOGFILE" > "${LOGFILE}.tmp" && mv "${LOGFILE}.tmp" "$LOGFILE"
+fi
+
 
 {
     echo "[$(date)] Starting PostgreSQL backup as user '$POSTGRES_USER'"
