@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # -------------------------------------------------------------------
-# PostgreSQL Backup Script (Large DB Version)
+# PostgreSQL Backup Script
 #
 # Description:
 #   - Dumps all PostgreSQL databases using pg_dumpall
@@ -15,7 +15,7 @@ set -euo pipefail
 #   ./backup_postgres.sh [postgres_unix_user]
 #   Defaults to "postgres" if not specified.
 #
-# Cron Example:
+# Cron Example (via `crontab -e`):
 #   0 2 * * 0 /bin/bash /home/youruser/ida-scripts/backup_postgres.sh
 #
 # Sudoers requirement (via `sudo visudo`):
