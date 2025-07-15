@@ -208,3 +208,6 @@ __marimo__/
 
 # All credentials files
 *_credentials*
+
+# Config files
+.conf
