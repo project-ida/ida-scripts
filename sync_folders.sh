@@ -8,6 +8,7 @@ set -euo pipefail
 #   - Monitors multiple local folders for file changes using inotifywait
 #   - Syncs changed folders to specified remote paths using rclone
 #   - Truncates individual logs if larger than LOG_MAX_MB
+#   - Gracefully stops all watchers on Ctrl+C
 #
 # Requirements:
 #   - rclone (configured, e.g. dropbox:)
@@ -22,6 +23,7 @@ set -euo pipefail
 CONFIG_FILE="./folders.conf"
 LOG_DIR="./sync_logs"
 LOG_MAX_MB=10
+PIDS=()
 
 mkdir -p "$LOG_DIR"
 
@@ -37,6 +39,18 @@ check_log_size() {
         tail -c "${LOG_MAX_MB}M" "$logfile" > "${logfile}.tmp" && mv "${logfile}.tmp" "$logfile"
     fi
 }
+
+# Cleanup function to stop all background processes
+cleanup() {
+    echo "Caught interrupt. Stopping all folder monitors..."
+    for pid in "${PIDS[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait
+    echo "All monitors stopped."
+    exit 0
+}
+trap cleanup SIGINT SIGTERM
 
 monitor_folder() {
     local folder="$1"
@@ -73,6 +87,7 @@ monitor_folder() {
 while IFS='=' read -r local_path remote_path; do
     [[ -z "$local_path" || -z "$remote_path" ]] && continue
     monitor_folder "$local_path" "$remote_path" &
+    PIDS+=($!)
 done < "$CONFIG_FILE"
 
 wait
