@@ -67,11 +67,12 @@ monitor_folder() {
         echo "[$(date)] Waiting 5 seconds before syncing..."
         sleep 5
 
-        echo "[$(date)] Syncing to $remote..."
-        rclone sync \
-            --log-file="$log_file" \
-            -v --progress --retries 10 --timeout 30s \
-            --ignore-checksum "$folder" "$remote"
+    echo "[$(date)] Syncing to $remote..."
+    rclone sync \
+        --log-file="$log_file" \
+        -v --progress --retries 10 --timeout 30s \
+        --ignore-checksum "$folder" "$remote" \
+        --exclude '.*'
 
         check_log_size "$log_file"
 
