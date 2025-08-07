@@ -8,7 +8,7 @@ import logging
 
 # Configuration
 CONFIG_FILE = "folders.conf"
-LOG_DIR = "sync_logs"
+LOG_DIR = "copy_logs"
 LOG_MAX_MB = 10  # Max log size in MB
 COPY_INTERVAL = 60  # Seconds between rclone copy runs
 threads = []
