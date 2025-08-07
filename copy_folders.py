@@ -40,10 +40,10 @@ def copy_folder(local_path, remote_path):
         ]
     )
     
-    logging.info(f"Started monitoring: {local_path} → {remote_path}")
+    logging.info(f"Started monitoring: {local_path} -> {remote_path}")
     
     while True:
-        logging.info(f"Copying to {remote_path}...")
+        logging.info(f"Starting copy cycle for {local_path} to {remote_path}")
         try:
             result = subprocess.run(
                 [
@@ -61,6 +61,7 @@ def copy_folder(local_path, remote_path):
                 logging.error(f"Copy failed for {local_path}: {result.stderr}")
         except Exception as e:
             logging.error(f"Error during copy: {e}")
+        logging.info(f"Waiting {COPY_INTERVAL} seconds until next copy cycle")
         time.sleep(COPY_INTERVAL)
 
 # Cleanup function for graceful shutdown
@@ -87,7 +88,7 @@ with open(CONFIG_FILE, 'r') as f:
         if not os.path.exists(local_path):
             print(f"Local path {local_path} does not exist. Skipping.")
             continue
-        print(f"Monitoring: {local_path} → {remote_path}")
+        print(f"Monitoring: {local_path} -> {remote_path}")
         
         # Start a thread for each folder
         thread = threading.Thread(target=copy_folder, args=(local_path, remote_path))
