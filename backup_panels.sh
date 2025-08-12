@@ -6,11 +6,8 @@ set -euo pipefail
 #
 # Description:
 #   - Archives and compresses the chosen folder (default: ~/data)
-#   - Optionally excludes files/folders from a config file (relative to run location)
-#   - Saves the .tar.gz file temporarily
-#   - Uploads to Google Drive using rclone
-#   - Deletes local .tar.gz to save space
-#   - Cleans up remote backups older than 30 days
+#   - Optionally excludes files/folders from a config file (relative to run dir)
+#   - Saves the .tar.gz temporarily, uploads via rclone, prunes remote >30d
 #
 # Usage:
 #   ./backup_panels.sh [source_directory]
@@ -29,10 +26,12 @@ set -euo pipefail
 SOURCE_DIR="${1:-$HOME/data}"
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 
+# Config & logs relative to where you execute the script
 CONFIG_FILE="./backup_panels_excludes.conf"
 LOG_DIR="./backup_logs"
 LOGFILE="$LOG_DIR/backup_log.txt"
 
+# Staging, remote and naming (same spirit as your original script)
 BACKUP_DIR="$HOME/panels_backup"
 ARCHIVE_NAME="$(basename "$SOURCE_DIR")_${TIMESTAMP}.tar"
 ARCHIVE_PATH="$BACKUP_DIR/$ARCHIVE_NAME"
@@ -41,52 +40,61 @@ GZ_PATH="${ARCHIVE_PATH}.gz"
 RCLONE_REMOTE="googledrive:panels_backup"
 LOG_MAX_MB=10
 
-# Ensure backup dir and log dir exist
-mkdir -p "$BACKUP_DIR"
-mkdir -p "$LOG_DIR"
+mkdir -p "$BACKUP_DIR" "$LOG_DIR"
 
-# Truncate log if larger than $LOG_MAX_MB MB
-if [ -f "$LOGFILE" ] && [ "$(stat -c%s "$LOGFILE")" -gt $(("$LOG_MAX_MB" * 1024 * 1024)) ]; then
+# Truncate the log file if it's larger than $LOG_MAX_MB MB
+if [ -f "$LOGFILE" ] && [ "$(stat -c%s "$LOGFILE")" -gt $((LOG_MAX_MB * 1024 * 1024)) ]; then
     tail -c "${LOG_MAX_MB}M" "$LOGFILE" > "${LOGFILE}.tmp" && mv "${LOGFILE}.tmp" "$LOGFILE"
 fi
 
 {
     echo "[$(date)] Starting backup for folder: $SOURCE_DIR"
 
-    # Step 1: Create tar archive with exclusions
-    TAR_CMD=(tar -cf "$ARCHIVE_PATH" -C "$(dirname "$SOURCE_DIR")")
+    # Build tar command with robust excludes
+    TAR_CMD=(tar --wildcards --wildcards-match-slash -cf "$ARCHIVE_PATH" -C "$(dirname "$SOURCE_DIR")")
     if [ -f "$CONFIG_FILE" ]; then
-        BASE_FOLDER="$(basename "$SOURCE_DIR")"
-        while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-            [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
-            TAR_CMD+=(--exclude="$BASE_FOLDER/$pattern")
-        done < "$CONFIG_FILE"
         echo "[$(date)] Using exclusions from: $CONFIG_FILE"
+        while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            # strip CR (Windows line endings) and trim whitespace
+            pattern="${pattern%$'\r'}"
+            pattern="$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+
+            if [[ "$pattern" == */ ]]; then
+                # Directory pattern: exclude it anywhere in the tree
+                name="${pattern%/}"
+                TAR_CMD+=( --exclude="*/$name" --exclude="*/$name/*" )
+            else
+                # File/filename glob pattern: pass through
+                TAR_CMD+=( --exclude="$pattern" )
+            fi
+        done < "$CONFIG_FILE"
     fi
-    TAR_CMD+=("$(basename "$SOURCE_DIR")")
+
+    TAR_CMD+=( "$(basename "$SOURCE_DIR")" )
     "${TAR_CMD[@]}"
     echo "[$(date)] Archive created: $ARCHIVE_PATH"
 
-    # Step 2: Compress with pigz
+    # Compress with pigz (streamed via pv)
     echo "[$(date)] Starting compression..."
     ionice -c2 -n7 nice -n19 pv --force -i 60 "$ARCHIVE_PATH" | pigz -6 > "$GZ_PATH"
     echo "[$(date)] Compression completed: $GZ_PATH"
 
-    # Step 3: Delete original .tar
+    # Remove original tar
     rm "$ARCHIVE_PATH"
     echo "[$(date)] Original TAR file deleted: $ARCHIVE_PATH"
 
-    # Step 4: Upload to Google Drive
+    # Upload to Google Drive
     /usr/bin/rclone copy -v --progress "$GZ_PATH" "$RCLONE_REMOTE"
     echo "[$(date)] Rclone upload completed: $RCLONE_REMOTE"
 
-    # Step 5: Delete local .gz
+    # Remove local .gz
     rm "$GZ_PATH"
     echo "[$(date)] Local .gz file deleted: $GZ_PATH"
 
-    # Step 6: Delete remote files older than 30 days
+    # Remote retention
     /usr/bin/rclone delete --min-age 30d "$RCLONE_REMOTE"
     echo "[$(date)] Remote retention cleanup completed (older than 30 days)"
 
-    echo "[$(date)] Backup completed successfully"
+    echo "[$(date)] Backup routine completed successfully"
 } >> "$LOGFILE" 2>&1
