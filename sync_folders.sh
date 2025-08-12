@@ -5,6 +5,7 @@ set -euo pipefail
 # Sync Folders Script
 #
 # Description:
+#   - Performs an initial sync for each folder on startup
 #   - Monitors multiple local folders for file changes using inotifywait
 #   - Syncs changed folders to specified remote paths using rclone
 #   - Truncates individual logs if larger than LOG_MAX_MB
@@ -60,6 +61,21 @@ monitor_folder() {
     local log_file="$LOG_DIR/rclone_${folder_name}.log"
 
     echo "Monitoring: $folder → $remote"
+
+    # Perform initial sync
+    echo "[$(date)] Performing initial sync for $folder to $remote..."
+    rclone sync \
+        --log-file="$log_file" \
+        -v --progress --retries 10 --timeout 30s \
+        --ignore-checksum "$folder" "$remote"
+
+    check_log_size "$log_file"
+
+    if [[ $? -eq 0 ]]; then
+        echo "[$(date)] Initial sync successful for $folder"
+    else
+        echo "[$(date)] Initial sync failed for $folder"
+    fi
 
     while inotifywait -r -e modify,create,delete,move "$folder"; do
         echo "[$(date)] Change detected in: $folder"
