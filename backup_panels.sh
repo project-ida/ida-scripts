@@ -5,23 +5,41 @@ set -euo pipefail
 # Panels Folder Backup Script
 #
 # Description:
-#   - Archives and compresses the chosen folder (default: ~/data)
-#   - Optionally excludes files/folders from a config file (relative to run dir)
-#   - Saves the .tar.gz temporarily, uploads via rclone, prunes remote >30d
+#   - Creates a compressed archive of the specified folder (default: ~/data)
+#   - Optionally excludes specific files/folders using a config file
+#     (backup_panels_excludes.conf, stored in the same directory you run the script from)
+#     The excludes file follows a simple format similar to .gitignore:
+#       * Lines starting with '#' are treated as comments
+#       * Blank lines are ignored
+#       * Wildcards (e.g. *.log) are supported
+#       * A trailing slash indicates a directory (e.g. cache/)
+#       * Directory patterns are excluded at any depth in the folder tree
+#   - Temporarily stores the archive as .tar, compresses to .tar.gz using pigz
+#   - Uploads the compressed file to Google Drive using rclone
+#   - Deletes the local archive after upload to save space
+#   - Removes remote backups older than 30 days to control storage use
 #
 # Usage:
 #   ./backup_panels.sh [source_directory]
-#   Defaults to "$HOME/data" if not specified.
+#   - Defaults to "$HOME/data" if no source_directory is provided
+#   - Logs are stored in ./backup_logs relative to where you run the script
+#   - The backup archive is staged in $HOME/panels_backup before upload
 #
 # Cron Example:
+#   # Run every Sunday at 02:00
 #   0 2 * * 0 /bin/bash /home/youruser/github/ida-scripts/backup_panels.sh
 #
 # Requirements:
-#   - tar
-#   - pv
-#   - pigz
-#   - rclone (configured, e.g. to respond to googledrive:panels_backup)
+#   - tar    (to create the archive)
+#   - pv     (to monitor progress during compression)
+#   - pigz   (parallel gzip compression)
+#   - rclone (configured with the remote googledrive)
+#
+# Remote:
+#   By default, uploads to the rclone remote "googledrive:panels_backup"
+#   To change, edit the RCLONE_REMOTE variable in the script
 # -------------------------------------------------------------------
+
 
 SOURCE_DIR="${1:-$HOME/data}"
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
