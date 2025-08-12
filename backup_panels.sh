@@ -38,7 +38,7 @@ LOG_MAX_MB=10
 
 # Resolve script directory so we can find exclude file alongside it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXCLUDES_FILE="$SCRIPT_DIR/backup_panels_excludes.txt"
+EXCLUDES_FILE="$SCRIPT_DIR/backup_panels_excludes.conf"
 
 mkdir -p "$BACKUP_DIR"
 
