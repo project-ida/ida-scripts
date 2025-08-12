@@ -47,7 +47,7 @@ TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 # Config & logs relative to where you execute the script
 CONFIG_FILE="./backup_panels_excludes.conf"
 LOG_DIR="./backup_logs"
-LOGFILE="$LOG_DIR/backup_log.txt"
+LOGFILE="$LOG_DIR/panels_backup.log"
 
 # Staging, remote and naming (same spirit as your original script)
 BACKUP_DIR="$HOME/panels_backup"
