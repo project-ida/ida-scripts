@@ -1,3 +1,22 @@
+"""
+# Copy Folders Script
+#
+# Description:
+#   - Periodically copies multiple local folders to specified remote paths using rclone
+#   - Runs copy operations in separate threads for each folder pair
+#   - Logs copy operations to individual log files with truncation if logs exceed LOG_MAX_MB
+#   - Gracefully stops all threads on Ctrl+C or termination signal
+#
+# Requirements:
+#   - Python 3.x
+#   - rclone (configured, e.g., dropbox:)
+#
+# Usage:
+#   python copy_folders.py
+#   Expects a file `folders.conf` with lines like:
+#       /local/folder1=dropbox:/remote/path1
+"""
+
 import os
 import time
 import subprocess
