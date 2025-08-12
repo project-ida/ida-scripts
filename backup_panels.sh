@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Description:
 #   - Archives and compresses the chosen folder (default: ~/data)
-#   - Optionally excludes files/folders from an exclude list
+#   - Optionally excludes files/folders from a config file (relative to run location)
 #   - Saves the .tar.gz file temporarily
 #   - Uploads to Google Drive using rclone
 #   - Deletes local .tar.gz to save space
@@ -23,26 +23,29 @@ set -euo pipefail
 #   - tar
 #   - pv
 #   - pigz
-#   - rclone (configured, e.g. to googledrive:panels)
+#   - rclone (configured, e.g. to respond to googledrive:panels_backup)
 # -------------------------------------------------------------------
 
 SOURCE_DIR="${1:-$HOME/data}"
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+
+CONFIG_FILE="./backup_panels_excludes.conf"
+LOG_DIR="./backup_logs"
+LOGFILE="$LOG_DIR/backup_log.txt"
+
 BACKUP_DIR="$HOME/panels_backup"
 ARCHIVE_NAME="$(basename "$SOURCE_DIR")_${TIMESTAMP}.tar"
 ARCHIVE_PATH="$BACKUP_DIR/$ARCHIVE_NAME"
 GZ_PATH="${ARCHIVE_PATH}.gz"
-LOGFILE="$HOME/backup_log.txt"
-RCLONE_REMOTE="googledrive:panels"
+
+RCLONE_REMOTE="googledrive:panels_backup"
 LOG_MAX_MB=10
 
-# Resolve script directory so we can find exclude file alongside it
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXCLUDES_FILE="$SCRIPT_DIR/backup_panels_excludes.conf"
-
+# Ensure backup dir and log dir exist
 mkdir -p "$BACKUP_DIR"
+mkdir -p "$LOG_DIR"
 
-# Truncate the log file if it's larger than $LOG_MAX_MB MB
+# Truncate log if larger than $LOG_MAX_MB MB
 if [ -f "$LOGFILE" ] && [ "$(stat -c%s "$LOGFILE")" -gt $(("$LOG_MAX_MB" * 1024 * 1024)) ]; then
     tail -c "${LOG_MAX_MB}M" "$LOGFILE" > "${LOGFILE}.tmp" && mv "${LOGFILE}.tmp" "$LOGFILE"
 fi
@@ -50,33 +53,34 @@ fi
 {
     echo "[$(date)] Starting backup for folder: $SOURCE_DIR"
 
-    # Step 1: Create tar archive (with exclusions if file exists)
+    # Step 1: Create tar archive with exclusions
     TAR_CMD=(tar -cf "$ARCHIVE_PATH" -C "$(dirname "$SOURCE_DIR")")
-    if [ -f "$EXCLUDES_FILE" ]; then
+    if [ -f "$CONFIG_FILE" ]; then
+        BASE_FOLDER="$(basename "$SOURCE_DIR")"
         while IFS= read -r pattern || [[ -n "$pattern" ]]; do
             [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
-            TAR_CMD+=(--exclude="$pattern")
-        done < "$EXCLUDES_FILE"
-        echo "[$(date)] Using exclusions from: $EXCLUDES_FILE"
+            TAR_CMD+=(--exclude="$BASE_FOLDER/$pattern")
+        done < "$CONFIG_FILE"
+        echo "[$(date)] Using exclusions from: $CONFIG_FILE"
     fi
     TAR_CMD+=("$(basename "$SOURCE_DIR")")
     "${TAR_CMD[@]}"
     echo "[$(date)] Archive created: $ARCHIVE_PATH"
 
-    # Step 2: Compress with pigz and log pv progress
+    # Step 2: Compress with pigz
     echo "[$(date)] Starting compression..."
     ionice -c2 -n7 nice -n19 pv --force -i 60 "$ARCHIVE_PATH" | pigz -6 > "$GZ_PATH"
     echo "[$(date)] Compression completed: $GZ_PATH"
 
-    # Step 3: Delete original .tar after successful compression
+    # Step 3: Delete original .tar
     rm "$ARCHIVE_PATH"
     echo "[$(date)] Original TAR file deleted: $ARCHIVE_PATH"
 
-    # Step 4: Upload to cloud
+    # Step 4: Upload to Google Drive
     /usr/bin/rclone copy -v --progress "$GZ_PATH" "$RCLONE_REMOTE"
     echo "[$(date)] Rclone upload completed: $RCLONE_REMOTE"
 
-    # Step 5: Delete local compressed file
+    # Step 5: Delete local .gz
     rm "$GZ_PATH"
     echo "[$(date)] Local .gz file deleted: $GZ_PATH"
 
@@ -84,5 +88,5 @@ fi
     /usr/bin/rclone delete --min-age 30d "$RCLONE_REMOTE"
     echo "[$(date)] Remote retention cleanup completed (older than 30 days)"
 
-    echo "[$(date)] Backup routine completed successfully"
+    echo "[$(date)] Backup completed successfully"
 } >> "$LOGFILE" 2>&1
