@@ -19,9 +19,9 @@ set -euo pipefail
 #   - bc (pre-installed on Ubuntu)
 #
 # Usage:
-#   ./monitor_and_sync.sh
+#   ./sync_folders.sh
 #   Expects a file `folders.conf` with lines like:
-#       /local/folder1=dropbox:/remote/path1
+#       /local/folder1="dropbox:/remote/path with spaces"
 # -------------------------------------------------------------------
 
 CONFIG_FILE="./folders.conf"
@@ -55,21 +55,28 @@ check_deletions() {
     check_output=$(rclone check "$folder" "$remote" --dry-run 2>&1)
     local deleted_files
     deleted_files=$(echo "$check_output" | grep -c "NOTICE:.*deleted")
-    local total_files
+    local total_files=0  # Default to 0 to avoid unbound variable
 
     # Try to read from cache
     if [[ -f "$cache_file" ]]; then
-        total_files=$(cat "$cache_file")
-        # Validate cache is a positive integer
-        if ! [[ "$total_files" =~ ^[0-9]+$ ]] || [[ "$total_files" -eq 0 ]]; then
-            unset total_files
+        total_files=$(cat "$cache_file" 2>/dev/null || echo "0")
+        if ! [[ "$total_files" =~ ^[0-9]+$ ]]; then
+            echo "[$(date)] WARNING: Invalid cache file $cache_file. Refetching remote file count."
+            total_files=0
         fi
     fi
 
     # If no valid cache, fetch remote file count
-    if [[ -z "$total_files" ]]; then
-        total_files=$(rclone size "$remote" --json | grep -o '"count": *[0-9]*' | grep -o '[0-9]*')
-        echo "$total_files" > "$cache_file"
+    if [[ "$total_files" -eq 0 ]]; then
+        local size_output
+        size_output=$(rclone size "$remote" --json 2>/dev/null || echo "{}")
+        total_files=$(echo "$size_output" | grep -o '"count":[[:space:]]*[0-9]\+' | grep -o '[0-9]\+' || echo "0")
+        if [[ "$total_files" =~ ^[0-9]+$ && "$total_files" -gt 0 ]]; then
+            echo "$total_files" > "$cache_file"
+        else
+            echo "[$(date)] ERROR: Failed to fetch or parse file count for $remote. Skipping sync to avoid potential deletions."
+            return 1
+        fi
     fi
 
     # Handle empty remote
@@ -144,8 +151,15 @@ monitor_folder() {
         if [[ $? -eq 0 ]]; then
             echo "[$(date)] Initial sync successful for $folder"
             # Update cache after successful sync
-            total_files=$(rclone size "$remote" --json | grep -o '"count": *[0-9]*' | grep -o '[0-9]*')
-            echo "$total_files" > "$cache_file"
+            local size_output
+            size_output=$(rclone size "$remote" --json 2>/dev/null || echo "{}")
+            local new_total_files
+            new_total_files=$(echo "$size_output" | grep -o '"count":[[:space:]]*[0-9]\+' | grep -o '[0-9]\+' || echo "0")
+            if [[ "$new_total_files" =~ ^[0-9]+$ && "$new_total_files" -gt 0 ]]; then
+                echo "$new_total_files" > "$cache_file"
+            else
+                echo "[$(date)] WARNING: Failed to update cache for $remote after sync."
+            fi
         else
             echo "[$(date)] Initial sync failed for $folder"
         fi
@@ -171,8 +185,15 @@ monitor_folder() {
             if [[ $? -eq 0 ]]; then
                 echo "[$(date)] Sync successful for $folder"
                 # Update cache after successful sync
-                total_files=$(rclone size "$remote" --json | grep -o '"count": *[0-9]*' | grep -o '[0-9]*')
-                echo "$total_files" > "$cache_file"
+                local size_output
+                size_output=$(rclone size "$remote" --json 2>/dev/null || echo "{}")
+                local new_total_files
+                new_total_files=$(echo "$size_output" | grep -o '"count":[[:space:]]*[0-9]\+' | grep -o '[0-9]\+' || echo "0")
+                if [[ "$new_total_files" =~ ^[0-9]+$ && "$new_total_files" -gt 0 ]]; then
+                    echo "$new_total_files" > "$cache_file"
+                else
+                    echo "[$(date)] WARNING: Failed to update cache for $remote after sync."
+                fi
             else
                 echo "[$(date)] Sync failed for $folder"
             fi
