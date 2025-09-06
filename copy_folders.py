@@ -68,7 +68,6 @@ def copy_folder(local_path, remote_path):
             # Stream rclone output so you see live progress lines
             cmd = [
                 "rclone", "copy",
-                "--log-file", log_file,
                 "-v",
                 "--stats=5s",            # print a line every 5s
                 "--stats-one-line",      # concise oneline stats
