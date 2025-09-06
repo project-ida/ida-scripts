@@ -122,8 +122,7 @@ with open(CONFIG_FILE, 'r') as f:
             continue
         local_path, remote_path = line.split('=', 1)
         if not os.path.exists(local_path):
-            print(f"Local path {local_path} does not exist. Skipping.")
-            continue
+            print(f"Local path {local_path} does not exist.")
         print(f"Monitoring: {local_path} -> {remote_path}")
         
         # Start a thread for each folder
