@@ -48,8 +48,8 @@ def check_log_size(logfile):
 def copy_folder(local_path, remote_path):
     folder_name = os.path.basename(local_path)
     log_file = os.path.join(LOG_DIR, f"rclone_{folder_name}.log")
-    
-    # Set up logging for this folder
+
+    # Per-thread logger (basicConfig is a no-op after first call, but harmless)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(message)s",
@@ -58,29 +58,47 @@ def copy_folder(local_path, remote_path):
             logging.StreamHandler()
         ]
     )
-    
-    logging.info(f"Started monitoring: {local_path} -> {remote_path}")
-    
+    logger = logging.getLogger(folder_name)
+
+    logger.info(f"Started monitoring: {local_path} -> {remote_path}")
+
     while True:
-        logging.info(f"Starting copy cycle for {local_path} to {remote_path}")
+        logger.info(f"Starting copy cycle for {local_path} to {remote_path}")
         try:
-            result = subprocess.run(
-                [
-                    "rclone", "copy",
-                    "--log-file", log_file,
-                    "-v", "--progress", "--retries", "10", "--timeout", "30s",
-                    "--ignore-checksum", local_path, remote_path
-                ],
-                capture_output=True, text=True
+            # Stream rclone output so you see live progress lines
+            cmd = [
+                "rclone", "copy",
+                "--log-file", log_file,
+                "-v",
+                "--stats=5s",            # print a line every 5s
+                "--stats-one-line",      # concise oneline stats
+                "--retries", "10",
+                "--timeout", "30s",
+                "--ignore-checksum",
+                local_path, remote_path
+            ]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
             )
+            # Forward live updates
+            for line in proc.stdout:
+                if line.strip():
+                    logger.info(line.rstrip())
+            ret = proc.wait()
             check_log_size(log_file)
-            if result.returncode == 0:
-                logging.info(f"Copy successful for {local_path}")
+
+            if ret == 0:
+                logger.info(f"Copy successful for {local_path}")
             else:
-                logging.error(f"Copy failed for {local_path}: {result.stderr}")
+                logger.error(f"Copy failed for {local_path} (exit {ret})")
         except Exception as e:
-            logging.error(f"Error during copy: {e}")
-        logging.info(f"Waiting {COPY_INTERVAL} seconds until next copy cycle")
+            logger.error(f"Error during copy: {e}")
+
+        logger.info(f"Waiting {COPY_INTERVAL} seconds until next copy cycle")
         time.sleep(COPY_INTERVAL)
 
 # Cleanup function for graceful shutdown
