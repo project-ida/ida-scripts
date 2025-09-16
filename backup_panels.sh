@@ -44,12 +44,15 @@ set -euo pipefail
 SOURCE_DIR="${1:-$HOME/data}"
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
 
-# Config & logs relative to where you execute the script
-CONFIG_FILE="./backup_panels_excludes.conf"
-LOG_DIR="./backup_logs"
+# Get absolute path to the script's directory
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
+# Config & logs relative to the script directory
+CONFIG_FILE="$SCRIPT_DIR/backup_panels_excludes.conf"
+LOG_DIR="$SCRIPT_DIR/backup_logs"
 LOGFILE="$LOG_DIR/panels_backup.log"
 
-# Staging, remote and naming (same spirit as your original script)
+# Staging, remote and naming
 BACKUP_DIR="$HOME/panels_backup"
 ARCHIVE_NAME="$(basename "$SOURCE_DIR")_${TIMESTAMP}.tar"
 ARCHIVE_PATH="$BACKUP_DIR/$ARCHIVE_NAME"
