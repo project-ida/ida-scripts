@@ -1,3 +1,31 @@
+"""
+File Cleaner Script
+-------------------
+
+This script monitors a folder (and its subfolders) and deletes files with specific
+extensions if they are older than a given number of hours. It runs continuously,
+re-checking at a chosen interval.
+
+Usage:
+    python script.py <folder> [--ext EXT] [--hours N] [--interval SECONDS]
+
+Arguments:
+    folder      Path to the folder to monitor.
+    --ext       Comma-separated list of file extensions to delete
+                (e.g. --ext jpg,png,txt). Default: jpg.
+    --hours     Age threshold in hours. Files older than this are deleted.
+                Default: 24.
+    --interval  How often to check, in seconds. Default: 600 (10 minutes).
+
+Examples:
+    # Delete .jpg files older than 24 hours, checking every 10 minutes
+    python script.py /tmp/photos --ext jpg
+
+    # Delete .jpg and .png files older than 48 hours, checking every 5 minutes
+    python script.py /tmp/photos --ext jpg,png --hours 48 --interval 300
+"""
+
+
 import os
 import time
 import argparse
