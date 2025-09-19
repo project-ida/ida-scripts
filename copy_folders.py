@@ -17,23 +17,27 @@ Usage:
 Config File (`folders.conf`):
   Each line should define a copy job in the format:
 
-      source_path=dest_path
+      source_path=dest_path|ext1,ext2,...
 
   - The left-hand side (`source_path`) is always the **copy source**.
   - The right-hand side (`dest_path`) is always the **copy destination**.
-  - Both values may be:
-      - A local filesystem path (e.g. `/home/user/docs`)
-      - An rclone remote path (e.g. `dropbox:/backup/docs`)
+  - An optional `|ext1,ext2,...` restricts copying to specific file extensions
+    (without leading dots). Example: `jpg,png,pdf`.
+  - If no `|` is provided, all files are copied.
 
 Examples:
-  # Local → Remote (push)
+  # Local → Remote (all files)
   /home/user/docs=dropbox:/backup/docs
 
-  # Remote → Local (pull)
-  dropbox:/backup/docs=/home/user/docs
+  # Remote → Local (only PDFs)
+  dropbox:/backup/reports=/home/user/reports|pdf
+
+  # Local → Remote (only images)
+  /home/user/photos=dropbox:/backup/photos|jpg,png,gif
 
 Notes:
-  - Config lines starting with `#` are ignored (comments).
+  - Lines starting with `#` are ignored (comments).
+  - If a local source path does not exist, it will be skipped.
 """
 
 import os
@@ -66,12 +70,13 @@ def check_log_size(logfile):
 
 
 # Function to periodically copy a folder
-def copy_folder(source_path, dest_path):
-    # Use source folder/remote name for log filename
-    folder_name = os.path.basename(source_path.rstrip("/"))
-    if not folder_name:
-        folder_name = source_path.replace(":", "_").replace("/", "_")
-    log_file = os.path.join(LOG_DIR, f"rclone_{folder_name}.log")
+def copy_folder(source_path, dest_path, include_exts=None):
+    include_exts = include_exts or []  # default: copy everything
+
+    # Build log file name
+    safe_source = source_path.replace(":", "_").replace("/", "_")
+    safe_dest = dest_path.replace(":", "_").replace("/", "_")
+    log_file = os.path.join(LOG_DIR, f"rclone_{safe_source}_TO_{safe_dest}.log")
 
     # Per-thread logger
     logging.basicConfig(
@@ -82,24 +87,30 @@ def copy_folder(source_path, dest_path):
             logging.StreamHandler()
         ]
     )
-    logger = logging.getLogger(folder_name)
+    logger = logging.getLogger(f"{safe_source}->{safe_dest}")
 
-    logger.info(f"Started monitoring: SOURCE={source_path} DEST={dest_path}")
+    logger.info(f"Started monitoring: SOURCE={source_path} DEST={dest_path} EXTENSIONS={include_exts or 'ALL'}")
 
     while True:
         logger.info(f"Starting copy cycle: SOURCE={source_path} DEST={dest_path}")
         try:
-            # rclone copy command
+            # Base rclone command
             cmd = [
                 "rclone", "copy",
                 "-v",
-                "--stats=5s",            # print a line every 5s
-                "--stats-one-line",      # concise one-line stats
+                "--stats=5s",
+                "--stats-one-line",
                 "--retries", "10",
                 "--timeout", "30s",
                 "--ignore-checksum",
-                source_path, dest_path
             ]
+
+            # Add include filters if needed
+            for ext in include_exts:
+                cmd.extend(["--include", f"*.{ext}"])
+
+            cmd.extend([source_path, dest_path])
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -107,10 +118,11 @@ def copy_folder(source_path, dest_path):
                 text=True,
                 bufsize=1
             )
-            # Forward live updates
+
             for line in proc.stdout:
                 if line.strip():
                     logger.info(line.rstrip())
+
             ret = proc.wait()
             check_log_size(log_file)
 
@@ -138,7 +150,7 @@ signal.signal(signal.SIGTERM, cleanup)
 
 # Read config and start copy threads
 if not os.path.exists(CONFIG_FILE):
-    print(f"Config file {CONFIG_FILE} not found. Please create it with source=dest pairs.")
+    print(f"Config file {CONFIG_FILE} not found. Please create it with source=dest|ext1,ext2 pairs.")
     sys.exit(1)
 
 with open(CONFIG_FILE, 'r') as f:
@@ -147,18 +159,24 @@ with open(CONFIG_FILE, 'r') as f:
         if not line or line.startswith("#") or '=' not in line:
             continue
 
-        source_path, dest_path = line.split('=', 1)
+        # Split into main part and optional extensions
+        path_part, *ext_part = line.split("|", 1)
+        source_path, dest_path = path_part.split("=", 1)
+        include_exts = []
+
+        if ext_part:
+            include_exts = [e.strip().lower() for e in ext_part[0].split(",") if e.strip()]
 
         # Skip missing local sources (but allow remotes like dropbox:/path)
         if not os.path.exists(source_path) and ":" not in source_path:
             print(f"Source path {source_path} does not exist. Skipping.")
             continue
 
-        print(f"Monitoring: SOURCE={source_path} DEST={dest_path}")
+        print(f"Monitoring: SOURCE={source_path} DEST={dest_path} EXTENSIONS={include_exts or 'ALL'}")
 
         # Start a thread for each copy job
-        thread = threading.Thread(target=copy_folder, args=(source_path, dest_path))
-        thread.daemon = True  # Daemon threads exit when the main process exits
+        thread = threading.Thread(target=copy_folder, args=(source_path, dest_path, include_exts))
+        thread.daemon = True
         thread.start()
         threads.append(thread)
 
