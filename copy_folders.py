@@ -25,16 +25,6 @@ Config File (`folders.conf`):
     (without leading dots). Example: `jpg,png,pdf`.
   - If no `|` is provided, all files are copied.
 
-Examples:
-  # Local → Remote (all files)
-  /home/user/docs=dropbox:/backup/docs
-
-  # Remote → Local (only PDFs)
-  dropbox:/backup/reports=/home/user/reports|pdf
-
-  # Local → Remote (only images)
-  /home/user/photos=dropbox:/backup/photos|jpg,png,gif
-
 Notes:
   - Lines starting with `#` are ignored (comments).
   - If a local source path does not exist, it will be skipped.
@@ -47,6 +37,12 @@ import signal
 import sys
 import threading
 import logging
+
+# Safe log filename sanitiser
+import re
+def safe_name(path: str) -> str:
+    return re.sub(r'[^A-Za-z0-9_.-]+', '_', path)
+
 
 # Configuration
 CONFIG_FILE = "folders.conf"
@@ -73,9 +69,9 @@ def check_log_size(logfile):
 def copy_folder(source_path, dest_path, include_exts=None):
     include_exts = include_exts or []  # default: copy everything
 
-    # Build log file name
-    safe_source = source_path.replace(":", "_").replace("/", "_")
-    safe_dest = dest_path.replace(":", "_").replace("/", "_")
+    # Use safe_name to handle spaces safely in log filename
+    safe_source = safe_name(source_path)
+    safe_dest = safe_name(dest_path)
     log_file = os.path.join(LOG_DIR, f"rclone_{safe_source}_TO_{safe_dest}.log")
 
     # Per-thread logger
@@ -149,21 +145,27 @@ signal.signal(signal.SIGTERM, cleanup)
 
 
 # Read config and start copy threads
+# Use rstrip("\n") instead of strip() to preserve spaces in paths.
 if not os.path.exists(CONFIG_FILE):
     print(f"Config file {CONFIG_FILE} not found. Please create it with source=dest|ext1,ext2 pairs.")
     sys.exit(1)
 
 with open(CONFIG_FILE, 'r') as f:
     for line in f:
-        line = line.strip()
-        if not line or line.startswith("#") or '=' not in line:
+        line = line.rstrip("\n")  # >>> CHANGED (instead of .strip())
+
+        if not line or line.lstrip().startswith("#") or '=' not in line:
             continue
 
         # Split into main part and optional extensions
         path_part, *ext_part = line.split("|", 1)
         source_path, dest_path = path_part.split("=", 1)
-        include_exts = []
 
+        # reserve internal spaces, only trim external accidental whitespace
+        source_path = source_path.strip()
+        dest_path = dest_path.strip()
+
+        include_exts = []
         if ext_part:
             include_exts = [e.strip().lower() for e in ext_part[0].split(",") if e.strip()]
 
