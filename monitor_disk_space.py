@@ -36,13 +36,13 @@ import os
 import shutil
 import logging
 from datetime import datetime
-from telegram_notifier import send_telegram_alert
 
 # ------------------------------------------------
 # Determine log path (same directory as script)
 # ------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(SCRIPT_DIR, "disk_monitor.log")
+TELEGRAM_CREDS_PATH = os.path.join(SCRIPT_DIR, "telegram_credentials.py")
 MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
@@ -120,6 +120,34 @@ def get_disk_usage_percent(path):
 
 
 # ------------------------------------------------
+# Notifications
+# ------------------------------------------------
+def notify(message, logger):
+    """
+    Send the alert via Telegram when credentials are present, otherwise warn and
+    print the message to the console.
+    """
+    if os.path.exists(TELEGRAM_CREDS_PATH):
+        try:
+            from telegram_notifier import send_telegram_alert
+
+            send_telegram_alert(message)
+            return
+        except ImportError as exc:
+            logger.warning(
+                f"Failed to import telegram notifier even though credentials file exists: {exc}"
+            )
+
+    warning = (
+        f"Telegram credentials file not found at {TELEGRAM_CREDS_PATH}. "
+        "Printing alert to console instead."
+    )
+    logger.warning(warning)
+    print(warning)
+    print(message)
+
+
+# ------------------------------------------------
 # Main
 # ------------------------------------------------
 def main():
@@ -192,7 +220,7 @@ def main():
             f"(threshold {threshold_percent}%) on {target_path}"
         )
 
-        send_telegram_alert(message)
+        notify(message, logger)
 
     else:
         logger.info(
