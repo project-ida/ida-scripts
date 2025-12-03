@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 monitor_disk_space.py
 ---------------------
 
@@ -127,7 +127,7 @@ def main():
         "-t",
         type=float,
         required=True,
-        help="Alert if free disk space (%) is below this value.",
+        help="Alert if free disk space (percent) is below this value.",
     )
 
     parser.add_argument(
