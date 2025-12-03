@@ -14,7 +14,9 @@ Features:
 - Sends alerts using an external Telegram bot notifier (send_telegram_alert).
 - Logs all events to a single file located next to the script.
 - Log file automatically truncates when larger than 10 MB (no rotating backups).
-- Includes computer name in the alert message (COMPUTER_NAME, HOSTNAME, fallback to hostname).
+- Includes computer name in the alert message via the COMPUTER_NAME environment variable.
+- Requires COMPUTER_NAME to be set; exits with instructions to run
+  ida-scripts/set_computer_name.py if missing.
 
 Usage:
     python3 monitor_disk_space.py --threshold 10
@@ -33,7 +35,6 @@ import argparse
 import os
 import shutil
 import logging
-import socket
 from datetime import datetime
 from telegram_notifier import send_telegram_alert
 
@@ -43,25 +44,6 @@ from telegram_notifier import send_telegram_alert
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(SCRIPT_DIR, "disk_monitor.log")
 MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
-
-
-# ------------------------------------------------
-# Helper: Determine computer name
-# ------------------------------------------------
-def get_computer_name():
-    """
-    Determine a consistent computer name.
-
-    Priority:
-    1. COMPUTER_NAME (Windows)
-    2. HOSTNAME (Linux/Mac/Unix)
-    3. socket.gethostname() fallback
-    """
-    return (
-        os.environ.get("COMPUTER_NAME")
-        or os.environ.get("HOSTNAME")
-        or socket.gethostname()
-    )
 
 
 # ------------------------------------------------
@@ -100,6 +82,23 @@ def setup_logging():
 
 
 # ------------------------------------------------
+# Validation
+# ------------------------------------------------
+def validate_computer_name(logger):
+    """Ensure COMPUTER_NAME is present before continuing."""
+    computer_name = os.environ.get("COMPUTER_NAME")
+    if computer_name:
+        return computer_name
+
+    message = (
+        "COMPUTER_NAME is not set. Run ida-scripts/set_computer_name.py to configure it."
+    )
+    logger.error(message)
+    print(f"ERROR: {message}")
+    raise SystemExit(1)
+
+
+# ------------------------------------------------
 # Disk Usage
 # ------------------------------------------------
 def get_disk_usage_percent(path):
@@ -117,7 +116,7 @@ def get_disk_usage_percent(path):
 # ------------------------------------------------
 def main():
     logger = setup_logging()
-    computer_name = get_computer_name()
+    computer_name = validate_computer_name(logger)
 
     parser = argparse.ArgumentParser(
         description="Check free disk space and send Telegram alert if below threshold."
