@@ -63,28 +63,35 @@ def enforce_log_size_limit():
             pass
 
 
-def setup_logging():
-    """Configure logging to a single append-only file."""
+def setup_logging(quiet=False):
+    """Configure logging to a file and optionally to console."""
     enforce_log_size_limit()
 
     logger = logging.getLogger("disk_monitor")
     logger.setLevel(logging.INFO)
 
-    handler = logging.FileHandler(LOG_PATH, mode="a")
+    # File handler
+    file_handler = logging.FileHandler(LOG_PATH, mode="a")
     formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-    logger.addHandler(handler)
+    # Console handler unless quiet
+    if not quiet:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
     return logger
 
 
 # ------------------------------------------------
 # Validation
 # ------------------------------------------------
-def validate_computer_name(logger):
+def validate_computer_name(logger, quiet=False):
     """Ensure COMPUTER_NAME is present before continuing."""
     computer_name = os.environ.get("COMPUTER_NAME")
     if computer_name:
@@ -94,7 +101,8 @@ def validate_computer_name(logger):
         "COMPUTER_NAME is not set. Run ida-scripts/set_computer_name.py to configure it."
     )
     logger.error(message)
-    print(f"ERROR: {message}")
+    if not quiet:
+        print(f"ERROR: {message}")
     raise SystemExit(1)
 
 
@@ -115,9 +123,6 @@ def get_disk_usage_percent(path):
 # Main
 # ------------------------------------------------
 def main():
-    logger = setup_logging()
-    computer_name = validate_computer_name(logger)
-
     parser = argparse.ArgumentParser(
         description="Check free disk space and send Telegram alert if below threshold."
     )
@@ -137,21 +142,36 @@ def main():
         help="Filesystem path to check. Default: '/' on Linux, 'C:\\\\' on Windows.",
     )
 
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress all console output (useful for cron or Task Scheduler).",
+    )
+
     args = parser.parse_args()
+    quiet = args.quiet
+
+    # Setup logging with quiet mode support
+    logger = setup_logging(quiet=quiet)
+
+    computer_name = validate_computer_name(logger, quiet=quiet)
     threshold_percent = args.threshold
     target_path = args.path
 
     # Validate threshold
     if not (1 <= threshold_percent <= 99):
         logger.error("Invalid threshold: must be between 1 and 99.")
-        print("ERROR: --threshold must be between 1 and 99.")
+        if not quiet:
+            print("ERROR: --threshold must be between 1 and 99.")
         return
 
     free_percent, total, free = get_disk_usage_percent(target_path)
 
     if free_percent is None:
         logger.error(f"Error reading disk usage for {target_path}")
-        print(f"ERROR: Could not read disk usage for {target_path}")
+        if not quiet:
+            print(f"ERROR: Could not read disk usage for {target_path}")
         return
 
     if free_percent < threshold_percent:
