@@ -31,8 +31,11 @@ import sys
 import platform
 from pathlib import Path
 from shutil import which
+import subprocess
+
 
 VAR = "COMPUTER_NAME"
+
 
 def prompt_for_value():
     value = input(f"Enter a name to assign to this computer ({VAR}): ").strip()
@@ -40,6 +43,7 @@ def prompt_for_value():
         print("No name entered. Aborting.")
         sys.exit(1)
     return value
+
 
 def update_file(path, content_line, match_prefix):
     """
@@ -55,6 +59,39 @@ def update_file(path, content_line, match_prefix):
     path.write_text("\n".join(lines) + "\n")
     print(f"Updated: {path}")
 
+
+# =====================================================================
+#  Add/update COMPUTER_NAME at top of crontab
+# =====================================================================
+def update_crontab_env(value):
+    """
+    Insert or replace COMPUTER_NAME=value as the FIRST line of the user's crontab.
+    Does not touch any other entries.
+    """
+
+    try:
+        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        cron_text = result.stdout if result.returncode == 0 else ""
+    except Exception:
+        cron_text = ""
+
+    lines = cron_text.splitlines()
+
+    # Remove any existing COMPUTER_NAME definition
+    lines = [ln for ln in lines if not ln.strip().startswith(f"{VAR}=")]
+
+    # Insert at top
+    lines.insert(0, f"{VAR}={value}")
+
+    new_cron = "\n".join(lines).rstrip() + "\n"
+
+    subprocess.run(["crontab", "-"], input=new_cron, text=True)
+    print("Updated crontab with COMPUTER_NAME at top.")
+
+
+# =====================================================================
+# MAIN
+# =====================================================================
 def main():
     value = prompt_for_value()
 
@@ -96,6 +133,13 @@ def main():
             update_file(ps_profile,
                         f'$env:{VAR} = "{value}"',
                         f"$env:{VAR}")
+
+    # -----------------------
+    # 
+    # Also update crontab environment (Linux + macOS only)
+    # -----------------------
+    if system in ("linux", "darwin"):
+        update_crontab_env(value)
 
     # Apply to current Python session (normal)
     os.environ[VAR] = value
