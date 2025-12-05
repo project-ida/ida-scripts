@@ -5,7 +5,7 @@ tasks.py
 
 Cross-platform scheduled task manager supporting:
 
-  - Create
+  - Add
   - List
   - Edit (change interval or command)
   - Remove
@@ -21,7 +21,7 @@ Intervals allowed:
 
 Example usage:
 
-    python task_scheduler.py create
+    python task_scheduler.py add
     python task_scheduler.py list
     python task_scheduler.py edit
     python task_scheduler.py remove
@@ -81,18 +81,18 @@ def install_crontab(new_text):
 
 
 # ============================================================
-# Task management: CREATE
+# Task management: ADD
 # ============================================================
-def create_task(name, command, minutes):
+def add_task(name, command, minutes):
     system = platform.system().lower()
 
     if "windows" in system:
-        return create_task_windows(name, command, minutes)
-    return create_task_cron(name, command, minutes)
+        return add_task_windows(name, command, minutes)
+    return add_task_cron(name, command, minutes)
 
 
 # ------------------- Windows CREATE -------------------------
-def create_task_windows(name, command, minutes):
+def add_task_windows(name, command, minutes):
     if minutes < 1:
         minutes = 1
 
@@ -114,7 +114,7 @@ def create_task_windows(name, command, minutes):
 
 
 # ------------------- Cron CREATE ----------------------------
-def create_task_cron(name, command, minutes):
+def add_task_cron(name, command, minutes):
     cron_expr = minutes_to_cron(minutes)
     tag = f"# TASK: {name}"
     cron_line = f"{tag}\n{cron_expr} {command}"
@@ -127,7 +127,7 @@ def create_task_cron(name, command, minutes):
 
     new_cron = crontab.strip() + "\n" + cron_line + "\n"
     install_crontab(new_cron)
-    print(f"Task '{name}' created.")
+    print(f"Task '{name}' addd.")
 
 
 # ============================================================
@@ -185,10 +185,10 @@ def edit_task(name, new_command=None, new_minutes=None):
     system = platform.system().lower()
 
     if "windows" in system:
-        # Windows cannot "edit", so delete + recreate
+        # Windows cannot "edit", so remove + add
         print("Editing requires task recreation on Windows.")
         remove_task(name)
-        create_task(name, new_command, new_minutes)
+        add_task(name, new_command, new_minutes)
         return
 
     # Linux/macOS cron
@@ -225,17 +225,17 @@ def edit_task(name, new_command=None, new_minutes=None):
 # ============================================================
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python task_scheduler.py [create|list|edit|remove]")
+        print("Usage: python task_scheduler.py [add|list|edit|remove]")
         return
 
     action = sys.argv[1].lower()
 
-    if action == "create":
+    if action == "add":
         name = input("Task name: ").strip()
         command = input("Command to run: ").strip()
         interval = input("Run how often? (5m, 2h, 1d): ").strip()
         minutes = parse_interval(interval)
-        create_task(name, command, minutes)
+        add_task(name, command, minutes)
 
     elif action == "list":
         list_tasks()
