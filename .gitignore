@@ -215,3 +215,6 @@ __marimo__/
 
 # Cache files
 *.cache
+
+# Alert history file
+alert_history.json

@@ -36,6 +36,9 @@ import os
 import shutil
 import logging
 from datetime import datetime
+import json
+import time
+
 
 # ------------------------------------------------
 # Determine log path (same directory as script)
@@ -44,6 +47,62 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(SCRIPT_DIR, "disk_monitor.log")
 TELEGRAM_CREDS_PATH = os.path.join(SCRIPT_DIR, "telegram_credentials.py")
 MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# ------------------------------------------------
+# Alert history management
+# ------------------------------------------------
+
+ALERT_HISTORY_PATH = os.path.join(SCRIPT_DIR, "alert_history.json")
+ALERT_COOLDOWN_HOURS = 24
+
+def load_alert_history():
+    """Load alert history from JSON file or return empty structure."""
+    if not os.path.exists(ALERT_HISTORY_PATH):
+        return {}
+    try:
+        with open(ALERT_HISTORY_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_alert_history(history):
+    """Save alert history to JSON file."""
+    try:
+        with open(ALERT_HISTORY_PATH, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception:
+        pass
+
+
+def should_send_alert(path):
+    """Return True if no alerts have been sent for this path within cooldown."""
+    history = load_alert_history()
+    timestamps = history.get(path, [])
+
+    cutoff = time.time() - (ALERT_COOLDOWN_HOURS * 3600)
+
+    # Keep only timestamps within the last 7 days (pruning old history)
+    timestamps = [ts for ts in timestamps if ts > (time.time() - 7 * 86400)]
+    history[path] = timestamps
+    save_alert_history(history)
+
+    # Check if any alert was sent recently
+    for ts in timestamps:
+        if ts > cutoff:
+            return False
+
+    return True
+
+
+def record_alert(path):
+    """Record current timestamp for a path."""
+    history = load_alert_history()
+    timestamps = history.get(path, [])
+    timestamps.append(time.time())
+    history[path] = timestamps
+    save_alert_history(history)
+
 
 
 # ------------------------------------------------
@@ -220,7 +279,14 @@ def main():
             f"(threshold {threshold_percent}%) on {target_path}"
         )
 
-        notify(message, logger, quiet=quiet)
+        # Check cooldown before sending the alert
+        if should_send_alert(target_path):
+            notify(message, logger, quiet=quiet)
+            record_alert(target_path)
+        else:
+            logger.info(
+                f"{computer_name}: Alert suppressed — already sent within last {ALERT_COOLDOWN_HOURS} hours"
+            )
 
     else:
         logger.info(
