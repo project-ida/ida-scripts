@@ -122,7 +122,7 @@ def get_disk_usage_percent(path):
 # ------------------------------------------------
 # Notifications
 # ------------------------------------------------
-def notify(message, logger):
+def notify(message, logger, quiet=False):
     """
     Send the alert via Telegram when credentials are present, otherwise warn and
     print the message to the console.
@@ -143,8 +143,8 @@ def notify(message, logger):
         "Printing alert to console instead."
     )
     logger.warning(warning)
-    print(warning)
-    print(message)
+    if not quiet:
+        print(message)
 
 
 # ------------------------------------------------
@@ -220,7 +220,7 @@ def main():
             f"(threshold {threshold_percent}%) on {target_path}"
         )
 
-        notify(message, logger)
+        notify(message, logger, quiet=quiet)
 
     else:
         logger.info(
