@@ -5,10 +5,10 @@ tasks.py
 
 Cross-platform scheduled task manager supporting:
 
-  - Add
-  - List
-  - Edit (change interval or command)
-  - Remove
+  - add
+  - list
+  - edit (change interval or command)
+  - remove
 
 Supports:
     * Windows Task Scheduler
@@ -21,10 +21,10 @@ Intervals allowed:
 
 Example usage:
 
-    python task_scheduler.py add
-    python task_scheduler.py list
-    python task_scheduler.py edit
-    python task_scheduler.py remove
+    python tasks.py add
+    python tasks.py list
+    python tasks.py edit
+    python tasks.py remove
 """
 
 import platform
@@ -40,6 +40,7 @@ def parse_interval(text):
     match = re.fullmatch(r"(\d+)([mhd])", text.strip().lower())
     if not match:
         raise ValueError("Invalid format. Use: 5m, 2h, 1d")
+
     number, unit = match.groups()
     number = int(number)
 
@@ -81,7 +82,7 @@ def install_crontab(new_text):
 
 
 # ============================================================
-# Task management: ADD
+# ADD TASK
 # ============================================================
 def add_task(name, command, minutes):
     system = platform.system().lower()
@@ -91,7 +92,7 @@ def add_task(name, command, minutes):
     return add_task_cron(name, command, minutes)
 
 
-# ------------------- Windows CREATE -------------------------
+# ------------------- Windows ADD ----------------------------
 def add_task_windows(name, command, minutes):
     if minutes < 1:
         minutes = 1
@@ -113,7 +114,7 @@ def add_task_windows(name, command, minutes):
         print(result.stderr)
 
 
-# ------------------- Cron CREATE ----------------------------
+# ------------------- Cron ADD -------------------------------
 def add_task_cron(name, command, minutes):
     cron_expr = minutes_to_cron(minutes)
     tag = f"# TASK: {name}"
@@ -127,7 +128,7 @@ def add_task_cron(name, command, minutes):
 
     new_cron = crontab.strip() + "\n" + cron_line + "\n"
     install_crontab(new_cron)
-    print(f"Task '{name}' addd.")
+    print(f"Task '{name}' added.")
 
 
 # ============================================================
@@ -141,16 +142,23 @@ def list_tasks():
         return
 
     # cron listing
-    crontab = get_crontab().splitlines()
+    cr_lines = get_crontab().splitlines()
     print("Scheduled tasks found in cron:\n")
-    for line in crontab:
+
+    current_name = None
+
+    for line in cr_lines:
         if line.startswith("# TASK:"):
-            print(line.replace("# TASK:", "").strip())
+            current_name = line.replace("# TASK:", "").strip()
+        elif current_name and line.strip():
+            print(f"- {current_name}: {line.strip()}")
+            current_name = None
+
     print()
 
 
 # ============================================================
-# REMOVE
+# REMOVE TASK
 # ============================================================
 def remove_task(name):
     system = platform.system().lower()
@@ -161,11 +169,11 @@ def remove_task(name):
         return
 
     # Linux/macOS cron
-    crontab = get_crontab().splitlines()
+    cr_lines = get_crontab().splitlines()
     new_cron = []
     skip = False
 
-    for line in crontab:
+    for line in cr_lines:
         if line.strip() == f"# TASK: {name}":
             skip = True
             continue
@@ -179,25 +187,23 @@ def remove_task(name):
 
 
 # ============================================================
-# EDIT
+# EDIT TASK
 # ============================================================
 def edit_task(name, new_command=None, new_minutes=None):
     system = platform.system().lower()
 
     if "windows" in system:
-        # Windows cannot "edit", so remove + add
-        print("Editing requires task recreation on Windows.")
+        print("Editing requires recreation on Windows.")
         remove_task(name)
         add_task(name, new_command, new_minutes)
         return
 
-    # Linux/macOS cron
-    crontab = get_crontab().splitlines()
+    cr_lines = get_crontab().splitlines()
     new_cron = []
     found = False
     skip_next = False
 
-    for line in crontab:
+    for line in cr_lines:
         if line.strip() == f"# TASK: {name}":
             found = True
             skip_next = True
@@ -211,7 +217,6 @@ def edit_task(name, new_command=None, new_minutes=None):
         print(f"ERROR: Task '{name}' not found.")
         return
 
-    # Add updated block
     cron_expr = minutes_to_cron(new_minutes)
     new_block = f"# TASK: {name}\n{cron_expr} {new_command}"
     new_cron.append(new_block)
@@ -225,7 +230,7 @@ def edit_task(name, new_command=None, new_minutes=None):
 # ============================================================
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python task_scheduler.py [add|list|edit|remove]")
+        print("Usage: python tasks.py [add|list|edit|remove]")
         return
 
     action = sys.argv[1].lower()
