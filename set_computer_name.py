@@ -9,18 +9,11 @@ sessions automatically inherit it. The following shells are supported:
   • Bash: ~/.bashrc, ~/.bash_profile, ~/.profile
   • Zsh:  ~/.zshrc, ~/.zprofile
   • Fish: ~/.config/fish/config.fish
-  • PowerShell (Windows/macOS/Linux):
-        ~/Documents/PowerShell/Microsoft.PowerShell_profile.ps1
 
-For each file, any existing definition of COMPUTER_NAME is removed
-and replaced with a single clean entry using the correct syntax for
-that shell. This ensures consistency across environments.
-
-Note:
-  - The variable is not injected into the parent shell that invoked
-    this script (a limitation of all shells). A new terminal session,
-    or manually reloading the relevant RC file, is required for the
-    variable to appear in the active environment.
+Additionally:
+  • On Linux/macOS: COMPUTER_NAME is placed at the top of the user's crontab.
+  • On Windows: COMPUTER_NAME is set using `setx`, making it a true persistent
+    Windows environment variable visible to Task Scheduler, CMD, PowerShell, etc.
 
 Usage:
     python3 set_computer_name.py
@@ -32,7 +25,6 @@ import platform
 from pathlib import Path
 from shutil import which
 import subprocess
-
 
 VAR = "COMPUTER_NAME"
 
@@ -61,7 +53,7 @@ def update_file(path, content_line, match_prefix):
 
 
 # =====================================================================
-#  Add/update COMPUTER_NAME at top of crontab
+# Add/update COMPUTER_NAME at top of crontab (Linux/macOS only)
 # =====================================================================
 def update_crontab_env(value):
     """
@@ -90,6 +82,27 @@ def update_crontab_env(value):
 
 
 # =====================================================================
+# Set persistent Windows environment variable using setx
+# =====================================================================
+def update_windows_env(value):
+    """
+    Use setx to create a persistent Windows environment variable.
+    This is the ONLY reliable way to make the value available to:
+    - PowerShell
+    - CMD
+    - Python
+    - Task Scheduler
+    - GUI applications
+    """
+    try:
+        subprocess.run(["setx", VAR, value], check=True, shell=True)
+        print(f"Set persistent Windows environment variable: {VAR}={value}")
+        print("You must log out and back in for changes to take effect.")
+    except Exception as e:
+        print(f"Failed to set Windows environment variable: {e}")
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 def main():
@@ -114,32 +127,22 @@ def main():
         for f in zsh_targets:
             update_file(f, f'export {VAR}="{value}"', f"export {VAR}=")
 
-    # -----------------------
-    # Fish — only if fish exists
-    # -----------------------
     if which("fish"):
         fish_file = home / ".config" / "fish" / "config.fish"
-        if fish_file.exists():  # Only update if config already exists
+        if fish_file.exists():
             update_file(fish_file, f'set -x {VAR} "{value}"', f"set -x {VAR} ")
 
     # -----------------------
-    # PowerShell — only if pwsh or powershell exists
-    # -----------------------
-    if which("pwsh") or which("powershell"):
-        documents = home / "Documents"
-        ps_profile = documents / "PowerShell" / "Microsoft.PowerShell_profile.ps1"
-
-        if ps_profile.exists():  # Only update if profile exists
-            update_file(ps_profile,
-                        f'$env:{VAR} = "{value}"',
-                        f"$env:{VAR}")
-
-    # -----------------------
-    # 
-    # Also update crontab environment (Linux + macOS only)
+    # Linux/macOS: add to crontab
     # -----------------------
     if system in ("linux", "darwin"):
         update_crontab_env(value)
+
+    # -----------------------
+    # Windows: use setx for global environment variable
+    # -----------------------
+    if system == "windows":
+        update_windows_env(value)
 
     # Apply to current Python session (normal)
     os.environ[VAR] = value
