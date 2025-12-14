@@ -14,14 +14,29 @@ set -euo pipefail
 #   - Cleans up remote backups older than 30 days
 #
 # Usage:
-#   ./backup_postgres.sh [postgres_unix_user]
-#   Defaults to "postgres" if not specified.
+#   ./backup_postgres.sh [backup_root] [postgres_unix_user]
+#
+# Arguments:
+#   backup_root         Root directory under which "postgres_backup" will be created.
+#                       Defaults to "$HOME" if not specified.
+#   postgres_unix_user  Unix user to run pg_dumpall as (typically "postgres").
+#                       Defaults to "postgres" if not specified.
+#
+# Examples:
+#   ./backup_postgres.sh
+#     -> uses $HOME/postgres_backup
+#
+#   ./backup_postgres.sh /srv/backups
+#     -> uses /srv/backups/postgres_backup
+#
+#   ./backup_postgres.sh /srv/backups postgres
+#     -> uses /srv/backups/postgres_backup and runs pg_dumpall as postgres
 #
 # Cron Example (via `crontab -e`):
-#   0 2 * * 0 /bin/bash /home/youruser/ida-scripts/backup_postgres.sh
+#   0 2 * * 0 /bin/bash /home/youruser/ida-scripts/backup_postgres.sh /srv/backups postgres
 #
 # Sudoers requirement (via `sudo visudo`):
-#  This script requires passwordless sudo access to run pg_dumpall:
+#   This script requires passwordless sudo access to run pg_dumpall:
 #   youruser ALL=(postgres) NOPASSWD: /usr/bin/pg_dumpall
 #
 # Requirements:
@@ -31,10 +46,11 @@ set -euo pipefail
 #   - rclone (configured, e.g. to googledrive:postgres_backup)
 # -------------------------------------------------------------------
 
-POSTGRES_USER="${1:-postgres}"
+BACKUP_ROOT="${1:-$HOME}"
+POSTGRES_USER="${2:-postgres}"
 
 TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
-BACKUP_DIR="$HOME/postgres_backup"
+BACKUP_DIR="${BACKUP_ROOT%/}/postgres_backup"
 DUMP_NAME="all_databases_${TIMESTAMP}.sql"
 DUMP_PATH="$BACKUP_DIR/$DUMP_NAME"
 GZ_PATH="${DUMP_PATH}.gz"
