@@ -18,6 +18,18 @@ Intervals allowed:
     Xm   → minutes
     Xh   → hours
     Xd   → days
+    Xw   → weeks
+
+Notes / limitations (cron):
+    - Cron cannot represent a true “every N weeks” rolling interval.
+    - For Linux/macOS, any interval expressed in whole weeks (e.g. 1w, 2w, 3w)
+      is scheduled as a standard weekly cron job: "0 0 * * 0"
+      (i.e. every Sunday at 00:00, server local time).
+    - This means:
+        * 1w behaves as expected (weekly)
+        * 2w, 3w, etc. will still run weekly (not every 2/3 weeks)
+    - If you need "every 2 weeks" or "every 14 days exactly", use a daily/weekly
+      schedule and add a last-run timestamp check in the called script.
 
 Example usage:
 
@@ -26,6 +38,7 @@ Example usage:
     python tasks.py edit
     python tasks.py remove
 """
+
 
 import platform
 import subprocess
@@ -37,9 +50,9 @@ import sys
 # Parsing human-friendly intervals
 # ============================================================
 def parse_interval(text):
-    match = re.fullmatch(r"(\d+)([mhd])", text.strip().lower())
+    match = re.fullmatch(r"(\d+)([mhdw])", text.strip().lower())
     if not match:
-        raise ValueError("Invalid format. Use: 5m, 2h, 1d")
+        raise ValueError("Invalid format. Use: 5m, 2h, 1d, 1w")
 
     number, unit = match.groups()
     number = int(number)
@@ -50,8 +63,10 @@ def parse_interval(text):
         return number * 60
     if unit == "d":
         return number * 1440
+    if unit == "w":
+        return number * 7 * 1440
 
-    raise ValueError("Unit must be m, h or d only.")
+    raise ValueError("Unit must be m, h, d or w only.")
 
 
 # ============================================================
@@ -60,8 +75,16 @@ def parse_interval(text):
 def minutes_to_cron(minutes):
     if minutes < 1:
         minutes = 1
+
+    WEEK = 7 * 24 * 60
+
+    # Prefer a real weekly cron over "*/7 day-of-month"
+    if minutes % WEEK == 0:
+        return "0 0 * * 0"   # every Sunday at 00:00 (cron's weekly)
+
     if minutes < 60:
         return f"*/{minutes} * * * *"
+
     if minutes % 60 == 0:
         hours = minutes // 60
         if hours < 24:
@@ -69,6 +92,7 @@ def minutes_to_cron(minutes):
         if hours % 24 == 0:
             days = hours // 24
             return f"0 0 */{days} * *"
+
     return "* * * * *"
 
 
@@ -238,7 +262,7 @@ def main():
     if action == "add":
         name = input("Task name: ").strip()
         command = input("Command to run: ").strip()
-        interval = input("Run how often? (5m, 2h, 1d): ").strip()
+        interval = input("Run how often? (5m, 2h, 1d, 1w): ").strip()
         minutes = parse_interval(interval)
         add_task(name, command, minutes)
 
@@ -252,7 +276,7 @@ def main():
     elif action == "edit":
         name = input("Task name to edit: ").strip()
         command = input("New command: ").strip()
-        interval = input("New interval (5m, 2h, 1d): ").strip()
+        interval = input("New interval (5m, 2h, 1d, 1w): ").strip()
         minutes = parse_interval(interval)
         edit_task(name, command, minutes)
 
