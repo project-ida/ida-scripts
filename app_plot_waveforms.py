@@ -326,10 +326,13 @@ def extract_window_waveforms(root_path: str,
         mask = mask_time
         have_energy = (BR_ENERGY in t.keys()) and (BR_ENERGY_SHORT in t.keys())
         e = es = None
-
-        if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
+        if have_energy:
+            # Always load energy branches so they can be displayed in the pulse list,
+            # even when no filter is provided.
             e  = t[BR_ENERGY].array(library="np")
             es = t[BR_ENERGY_SHORT].array(library="np")
+
+        if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
             with np.errstate(divide="ignore", invalid="ignore"):
                 psd = 1.0 - (es / e)
             # Drop invalid PSDs; if you prefer to treat them as 0, replace next line with:
@@ -343,8 +346,6 @@ def extract_window_waveforms(root_path: str,
             dbg["psd_keep"] = dbg["time_match"]
 
         if have_energy and (filt.get("e_lo") is not None or filt.get("e_hi") is not None):
-            if e is None:  e  = t[BR_ENERGY].array(library="np")
-            if es is None: es = t[BR_ENERGY_SHORT].array(library="np")
             m = np.ones_like(e, dtype=bool)
             if filt.get("e_lo") is not None: m &= (e >= float(filt["e_lo"]))
             if filt.get("e_hi") is not None: m &= (e <= float(filt["e_hi"]))
@@ -617,11 +618,14 @@ def extract_window_fullsamples(root_path: str,
 
         have_energy = (BR_ENERGY in t.keys()) and (BR_ENERGY_SHORT in t.keys())
         e = es = None
+        if have_energy:
+            # Always load energy branches so they can be returned in JSON even when
+            # no filter is provided.
+            e  = t[BR_ENERGY].array(library="np")
+            es = t[BR_ENERGY_SHORT].array(library="np")
         mask = mask_time
 
         if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
-            e  = t[BR_ENERGY].array(library="np")
-            es = t[BR_ENERGY_SHORT].array(library="np")
             with np.errstate(divide="ignore", invalid="ignore"):
                 psd = 1.0 - (es / e)
             m = np.isfinite(psd)
@@ -633,8 +637,6 @@ def extract_window_fullsamples(root_path: str,
             dbg["psd_keep"] = dbg["time_match"]
 
         if have_energy and (filt.get("e_lo") is not None or filt.get("e_hi") is not None):
-            if e is None:  e  = t[BR_ENERGY].array(library="np")
-            if es is None: es = t[BR_ENERGY_SHORT].array(library="np")
             m = np.ones_like(e, dtype=bool)
             if filt.get("e_lo") is not None: m &= (e >= float(filt["e_lo"]))
             if filt.get("e_hi") is not None: m &= (e <= float(filt["e_hi"]))
@@ -663,13 +665,16 @@ def extract_window_fullsamples(root_path: str,
 
             Ei = Esi = P = None
             if have_energy:
-                Ei  = float(e[i])
-                Esi = float(es[i])
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    P = float(1.0 - (Esi / Ei)) if Ei else None
-                if not np.isfinite(P): P = None
-                if not np.isfinite(Ei): Ei = None
-                if not np.isfinite(Esi): Esi = None
+                try:
+                    Ei  = float(e[i])
+                    Esi = float(es[i])
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        P = float(1.0 - (Esi / Ei)) if Ei else None
+                    if not np.isfinite(P): P = None
+                    if not np.isfinite(Ei): Ei = None
+                    if not np.isfinite(Esi): Esi = None
+                except Exception:
+                    Ei = Esi = P = None
 
             out.append({
                 "time": abs_times[i].isoformat(),
@@ -1045,4 +1050,3 @@ def waveforms_meta():
 # Local dev only (use gunicorn in prod)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)
-
