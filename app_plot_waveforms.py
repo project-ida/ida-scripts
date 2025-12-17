@@ -14,6 +14,9 @@ Routes:
   /waveforms.meta  -> overlapping ROOT files (lightweight)
 """
 
+# Safety caps for the "all pulses with samples" JSON
+ALL_JSON_MAX_WAVEFORMS = 2000   # refuse if more than this, unless &force=1
+
 import os, io, re, json
 from datetime import datetime, timedelta, timezone
 from dateutil import parser as dateparser
@@ -404,6 +407,8 @@ def collect_series(params):
     filt = params["filter"]; debug = params["debug"]
 
     idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel)
+    if debug:
+        print("Expanded SQL:\n", sql_expanded)
 
     # Hard cap on overlapping files
     overlap_n = int(len(idx_df))
@@ -576,6 +581,174 @@ def plot_waveforms(series, title, yoffset):
     plt.close(fig)
     return buf.getvalue()
 
+# ---- NEW: collect *all* matching pulses (no waveforms) ----------------------
+
+def extract_window_fullsamples(root_path: str,
+                               file_start_abs: datetime,
+                               start: datetime,
+                               end: datetime,
+                               gran: int,
+                               filt: dict):
+    """
+    Like extract_window_pulsemeta but also returns the waveform samples for *each* pulse.
+    Returns (records, debug_counts, final_count)
+    """
+    out = []
+    dbg = {"scanned": 0, "time_match": 0, "psd_keep": 0, "energy_keep": 0, "final_keep": 0}
+
+    with uproot.open(root_path) as f:
+        if TTREE_NAME not in f:
+            return out, dbg, 0
+        t = f[TTREE_NAME]
+
+        ts = t[BR_TIMESTAMP].array(library="np")
+        if ts is None or len(ts) == 0:
+            return out, dbg, 0
+
+        rel_s = (ts - ts[0]) / TIMESTAMP_DIVISOR
+        abs_times = np.array([file_start_abs + timedelta(seconds=float(s)) for s in rel_s])
+
+        # time window (OPEN interval to match DB screenshots)
+        mask_time = (abs_times > start) & (abs_times < end)
+        dbg["scanned"] = int(len(ts))
+        dbg["time_match"] = int(mask_time.sum())
+        if dbg["time_match"] == 0:
+            return out, dbg, 0
+
+        have_energy = (BR_ENERGY in t.keys()) and (BR_ENERGY_SHORT in t.keys())
+        e = es = None
+        mask = mask_time
+
+        if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
+            e  = t[BR_ENERGY].array(library="np")
+            es = t[BR_ENERGY_SHORT].array(library="np")
+            with np.errstate(divide="ignore", invalid="ignore"):
+                psd = 1.0 - (es / e)
+            m = np.isfinite(psd)
+            if filt.get("psd_lo") is not None: m &= (psd >= float(filt["psd_lo"]))
+            if filt.get("psd_hi") is not None: m &= (psd <= float(filt["psd_hi"]))
+            mask &= m
+            dbg["psd_keep"] = int(np.logical_and(mask_time, m).sum())
+        else:
+            dbg["psd_keep"] = dbg["time_match"]
+
+        if have_energy and (filt.get("e_lo") is not None or filt.get("e_hi") is not None):
+            if e is None:  e  = t[BR_ENERGY].array(library="np")
+            if es is None: es = t[BR_ENERGY_SHORT].array(library="np")
+            m = np.ones_like(e, dtype=bool)
+            if filt.get("e_lo") is not None: m &= (e >= float(filt["e_lo"]))
+            if filt.get("e_hi") is not None: m &= (e <= float(filt["e_hi"]))
+            mask &= m
+            dbg["energy_keep"] = int(np.logical_and(mask_time, m).sum())
+        else:
+            dbg["energy_keep"] = dbg["psd_keep"]
+
+        if not mask.any():
+            return out, dbg, 0
+
+        idx = np.flatnonzero(mask)
+        dbg["final_keep"] = int(idx.size)
+
+        samples = t[BR_SAMPLES].array(library="np")  # jagged/object
+
+        for i in idx:
+            y = samples[i]
+            try:
+                y = np.asarray(y)
+            except Exception:
+                y = np.array(list(y))
+            if gran > 1:
+                y = y[::gran]
+            y = y.tolist()
+
+            Ei = Esi = P = None
+            if have_energy:
+                Ei  = float(e[i])
+                Esi = float(es[i])
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    P = float(1.0 - (Esi / Ei)) if Ei else None
+                if not np.isfinite(P): P = None
+                if not np.isfinite(Ei): Ei = None
+                if not np.isfinite(Esi): Esi = None
+
+            out.append({
+                "time": abs_times[i].isoformat(),
+                "samples": y,
+                "energy": Ei,
+                "energy_short": Esi,
+                "psd": P
+            })
+
+    return out, dbg, dbg["final_keep"]
+
+def collect_all_pulses_with_samples(params):
+    """
+    Returns (files_used, dbg, pulses_all, total_matching_all_files).
+    Includes waveform samples for every matching pulse (downsampled by gran).
+    """
+    table = params["table"]; start = params["start"]; end = params["end"]
+    channel = params["channel"]; filt = params["filter"]; debug = params["debug"]
+    gran = params["gran"]
+
+    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel)
+
+    overlap_n = int(len(idx_df))
+    if overlap_n > MAX_ROOT_FILES:
+        abort(400, f"Too many ROOT files match the selected window ({overlap_n} > {MAX_ROOT_FILES}). Please select a narrower time span.")
+
+    files_used, pulses_all = [], []
+    debug_per_file = []
+    total_matching = 0
+
+    for _, row in idx_df.iterrows():
+        root_path = safe_join(ROOT_BASE_DIR, row[COL_COMPUTER], row[COL_DIR], row[COL_FILE])
+        if not os.path.exists(root_path):
+            continue
+
+        fstart = _to_naive_py_datetime(row["fname_start"])
+        fend   = _to_naive_py_datetime(row["fname_end"])
+        if (fend <= start) or (fstart >= end):
+            continue
+
+        try:
+            recs, dbg, nmatch = extract_window_fullsamples(
+                root_path=root_path,
+                file_start_abs=fstart,
+                start=start, end=end,
+                gran=gran,
+                filt=filt
+            )
+        except Exception:
+            continue
+
+        total_matching += nmatch
+        pulses_all.extend(recs)
+        files_used.append({
+            "path": root_path,
+            "file_start": fstart.isoformat(),
+            "file_end": fend.isoformat(),
+            "count": int(nmatch),
+        })
+
+        if debug:
+            debug_per_file.append({
+                "path": root_path,
+                "file_start": fstart.isoformat(),
+                "file_end": fend.isoformat(),
+                **dbg
+            })
+
+    # chronological
+    pulses_all.sort(key=lambda d: d["time"])
+    dbg = {
+        "sql": str(sql),
+        "sql_params": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in sql_params.items()},
+        "expanded_sql": sql_expanded,
+        "candidate_count": int(len(idx_df)),
+        "per_file": debug_per_file
+    }
+    return files_used, dbg, pulses_all, int(total_matching)
+
 # -------------------- Routes --------------------------------------------------
 
 @app.route("/waveforms")
@@ -647,7 +820,11 @@ def waveforms_shell():
   <img id="plot" alt="waveform-plot">
   <div id="pulse-list" class="muted" style="margin-top:10px; font-size:12px;"></div>
 
-  <div style="margin-top:8px;"><a id="json" href="{json_url}">Download JSON</a></div>
+  <div style="margin-top:8px;">
+    <a id="json_plot" href="{json_url}">Download JSON (plotted selection)</a>
+    &nbsp;|&nbsp;
+    <a id="json_all"  href="/waveforms.all.json?{qs}">Download JSON (all matching pulses)</a>
+  </div>
 
   {"<details style='margin-top:14px;'><summary>Debug</summary><div id='dbg'></div></details>" if p["debug"] else ""}
 
@@ -725,7 +902,8 @@ def waveforms_shell():
       }}
       mReturned.textContent = d.count + " of " + d.total_matching +
         " waveform(s) (max_n=" + d.max_n + ", granularity=" + d.granularity + ", yoffset=" + d.yoffset + ")";
-      document.getElementById('json').href = "{json_url}";
+      document.getElementById('json_plot').href = "{json_url}";
+      document.getElementById('json_all').href  = "/waveforms.all.json?{qs}";
 
       // ---- Pulse list (plotted only), sorted by timestamp ----
       const host = document.getElementById('pulse-list');
@@ -809,6 +987,40 @@ def waveforms_json():
         "files": files_used,
         "data": [{"time": t, "samples": y} for (t, y) in series],
         "pulses": pulses,  # plotted pulses (ordered by time)
+        "debug": dbg if p["debug"] else None
+    }), 200, {"Cache-Control": "no-store"}
+
+@app.route("/waveforms.all.json")
+def waveforms_all_json():
+    try:
+        p = get_params()
+        force = request.args.get("force", "").lower() in {"1","true","yes"}
+        files_used, dbg, pulses_all, total_matching = collect_all_pulses_with_samples(p)
+
+        # Safety guard unless force=1
+        if not force and len(pulses_all) > ALL_JSON_MAX_WAVEFORMS:
+            msg = (f"Too many matching pulses for a single JSON payload "
+                   f"({len(pulses_all)} > {ALL_JSON_MAX_WAVEFORMS}). "
+                   f"Please narrow the time window or re-run with &force=1 (careful: very large JSON).")
+            return jsonify({"error": msg, "returned_pulses": len(pulses_all),
+                            "total_matching": total_matching}), 413, {"Cache-Control": "no-store"}
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400, {"Cache-Control": "no-store"}
+
+    return jsonify({
+        "table": p["table"],
+        "start": p["start"].isoformat(),
+        "end": p["end"].isoformat(),
+        "channel": p["channel"] or None,
+        "device": p["device"] or None,
+        "filter_raw": p["filter_raw"],
+        "filter_parsed": p["filter"],
+        "granularity": p["gran"],
+        "returned_pulses": len(pulses_all),
+        "total_matching": int(total_matching),
+        "files": files_used,
+        "pulses": pulses_all,     # EVERY matching pulse, with samples 
         "debug": dbg if p["debug"] else None
     }), 200, {"Cache-Control": "no-store"}
 
