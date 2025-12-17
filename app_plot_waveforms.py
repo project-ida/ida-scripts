@@ -80,11 +80,29 @@ def parse_dt(s: str) -> datetime:
         abort(400, f"Invalid timestamp: {s}. Use ISO8601, e.g. 2025-09-08T12:00:00")
 
 def safe_join(base: str, *parts: str) -> str:
-    cleaned = [base.rstrip("/")]
+    """
+    Join path components under a fixed base directory.
+    Also normalizes Windows-style separators (`\\`) because some DB rows store
+    `dir` with backslashes.
+    """
+    base_norm = os.path.normpath(str(base))
+    cleaned = []
     for p in parts:
-        s = str(p).replace("\u00A0", " ").strip().strip("/")
+        s = str(p).replace("\u00A0", " ").strip()
+        s = s.replace("\\", "/").strip("/")
+        if not s:
+            continue
+        if ".." in s.split("/"):
+            abort(400, "Invalid path component.")
         cleaned.append(s)
-    return os.path.normpath("/".join(cleaned))
+
+    out = os.path.normpath(os.path.join(base_norm, *cleaned))
+    try:
+        if os.path.commonpath([base_norm, out]) != base_norm:
+            abort(400, "Resolved path escapes base directory.")
+    except Exception:
+        abort(400, "Failed to resolve safe path.")
+    return out
 
 def _to_naive_py_datetime(x):
     """Return a *naive* Python datetime for pandas/np/py datetimes."""
