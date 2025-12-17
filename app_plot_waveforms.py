@@ -51,7 +51,7 @@ engine = create_engine(CONNECTION_URI, pool_pre_ping=True, future=True)
 ROOT_BASE_DIR = "/mnt/gdrive/Computers"  # adjust if needed
 
 DEFAULT_INDEX_TABLE = "root_files"
-COL_TIME, COL_COMPUTER, COL_DIR, COL_FILE = "time", "computer", "dir", "file"
+COL_TIME, COL_COMPUTER, COL_DIR, COL_FILE, COL_DEVICE = "time", "computer", "dir", "file", "device"
 
 TTREE_NAME      = "Data_R"
 BR_TIMESTAMP    = "Timestamp"
@@ -221,6 +221,7 @@ def get_params():
     end_s   = request.args.get("end", "").strip()
     channel = request.args.get("channel", "").strip()
     device  = request.args.get("device", "").strip()  # e.g. "caen8ch_ch7"
+    device_base = None
     max_n   = int(request.args.get("max_n", DEFAULT_MAX_N))
     gran    = int(request.args.get("granularity", DEFAULT_GRAN))
     yoffs   = float(request.args.get("yoffset", DEFAULT_YOFFS))
@@ -233,10 +234,14 @@ def get_params():
     start, end = parse_dt(start_s), parse_dt(end_s)
     if end <= start: abort(400, "end must be after start")
 
-    if not channel and device:
-        m = re.search(r"_ch(\d+)$", device)
+    if device:
+        m = re.match(r"^(.*)_ch(\d+)$", device)
         if m:
-            channel = m.group(1)
+            device_base = m.group(1)
+            if not channel:
+                channel = m.group(2)
+        else:
+            device_base = device or None
 
     max_n = max(1, min(max_n, HARD_CAP_N))
     gran = max(1, gran)
@@ -247,46 +252,54 @@ def get_params():
         "table": table, "start": start, "end": end, "channel": channel,
         "max_n": max_n, "gran": gran, "yoffs": yoffs,
         "filter_raw": filt, "filter": parsed, "device": device or None,
+        "device_base": device_base,
         "debug": debug
     }
 
 # ---- DB + file candidates ----------------------------------------------------
 
-def candidate_files(table: str, start: datetime, end: datetime, channel: str):
+def candidate_files(table: str, start: datetime, end: datetime, channel: str, device_base=None):
     """
     Postgres filename-aware search: extract start/end from filename and find
     rows whose filename interval overlaps [start, end). Keep everything naive/local.
     """
-    file_like = "TRUE"
+    def _make_sql(where_clause: str):
+        return text(f"""
+            WITH r AS (
+              SELECT {COL_TIME} AS time,
+                     {COL_COMPUTER} AS computer,
+                     {COL_DIR} AS dir,
+                     {COL_FILE} AS file,
+                     regexp_match({COL_FILE}, '([0-9]{{8}}_[0-9]{{6}})-([0-9]{{8}}_[0-9]{{6}})') AS m
+              FROM {table}
+              WHERE {where_clause}
+            )
+            SELECT time, computer, dir, file,
+                   to_timestamp(m[1], 'YYYYMMDD_HH24MISS')::timestamp AS fname_start,
+                   to_timestamp(m[2], 'YYYYMMDD_HH24MISS')::timestamp AS fname_end
+            FROM r
+            WHERE m IS NOT NULL
+              -- overlap test with half-open window [t0, t1)
+              AND to_timestamp(m[1], 'YYYYMMDD_HH24MISS')::timestamp <  :t1
+              AND to_timestamp(m[2], 'YYYYMMDD_HH24MISS')::timestamp >= :t0
+            ORDER BY time ASC
+            LIMIT 4000
+        """)
+
+    conditions = []
     params = {"t0": start, "t1": end}
     if channel:
-        file_like = f"{COL_FILE} LIKE :pat"
+        conditions.append(f"{COL_FILE} LIKE :pat")
         params["pat"] = f"%CH{channel}@%"
+    if device_base:
+        conditions.append(f"lower({COL_DEVICE}) = lower(:dev)")
+        params["dev"] = device_base
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
     # IMPORTANT:
     #  - no "AT TIME ZONE 'UTC'" here (it caused the +4h shift during EDT)
     #  - cast to ::timestamp to force 'timestamp without time zone' (naive)
-    sql = text(f"""
-        WITH r AS (
-          SELECT {COL_TIME} AS time,
-                 {COL_COMPUTER} AS computer,
-                 {COL_DIR} AS dir,
-                 {COL_FILE} AS file,
-                 regexp_match({COL_FILE}, '([0-9]{{8}}_[0-9]{{6}})-([0-9]{{8}}_[0-9]{{6}})') AS m
-          FROM {table}
-          WHERE {file_like}
-        )
-        SELECT time, computer, dir, file,
-               to_timestamp(m[1], 'YYYYMMDD_HH24MISS')::timestamp AS fname_start,
-               to_timestamp(m[2], 'YYYYMMDD_HH24MISS')::timestamp AS fname_end
-        FROM r
-        WHERE m IS NOT NULL
-          -- overlap test with half-open window [t0, t1)
-          AND to_timestamp(m[1], 'YYYYMMDD_HH24MISS')::timestamp <  :t1
-          AND to_timestamp(m[2], 'YYYYMMDD_HH24MISS')::timestamp >= :t0
-        ORDER BY time ASC
-        LIMIT 4000
-    """)
+    sql = _make_sql(where_clause)
 
     with engine.connect() as c:
         df = pd.read_sql(sql, c, params=params)
@@ -439,9 +452,10 @@ def collect_series(params):
     """
     table = params["table"]; start = params["start"]; end = params["end"]
     channel = params["channel"]; max_n = params["max_n"]; gran = params["gran"]
+    device_base = params.get("device_base")
     filt = params["filter"]; debug = params["debug"]
 
-    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel)
+    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel, device_base=device_base)
     if debug:
         print("Expanded SQL:\n", sql_expanded)
 
@@ -529,8 +543,9 @@ def list_files_in_window(params):
     """Lightweight path: list overlapping files (no samples loaded)."""
     table = params["table"]; start = params["start"]; end = params["end"]
     channel = params["channel"]
+    device_base = params.get("device_base")
 
-    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel)
+    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel, device_base=device_base)
     overlap_n = int(len(idx_df))
     if overlap_n > MAX_ROOT_FILES:
         return None, {
@@ -740,9 +755,10 @@ def collect_all_pulses_with_samples(params):
     """
     table = params["table"]; start = params["start"]; end = params["end"]
     channel = params["channel"]; filt = params["filter"]; debug = params["debug"]
+    device_base = params.get("device_base")
     gran = params["gran"]
 
-    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel)
+    idx_df, sql, sql_params, sql_expanded = candidate_files(table, start, end, channel, device_base=device_base)
 
     overlap_n = int(len(idx_df))
     if overlap_n > MAX_ROOT_FILES:
