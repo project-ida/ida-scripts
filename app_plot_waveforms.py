@@ -342,15 +342,23 @@ def extract_window_waveforms(root_path: str,
             return out, dbg, 0, details
 
         mask = mask_time
-        have_energy = (BR_ENERGY in t.keys()) and (BR_ENERGY_SHORT in t.keys())
+        have_energy = (BR_ENERGY in t.keys())
+        have_energy_short = (BR_ENERGY_SHORT in t.keys())
         e = es = None
         if have_energy:
-            # Always load energy branches so they can be displayed in the pulse list,
-            # even when no filter is provided.
-            e  = t[BR_ENERGY].array(library="np")
+            # Always load Energy so it can be displayed in the pulse list, even when
+            # no filter is provided.
+            e = t[BR_ENERGY].array(library="np")
+        if have_energy_short:
+            # Load EnergyShort if available (needed for PSD display/filtering).
             es = t[BR_ENERGY_SHORT].array(library="np")
 
-        if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
+        want_psd = (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None)
+        psd_available = bool(have_energy and have_energy_short)
+        dbg["psd_available"] = psd_available
+        dbg["psd_applied"] = bool(want_psd and psd_available)
+
+        if want_psd and psd_available:
             with np.errstate(divide="ignore", invalid="ignore"):
                 psd = 1.0 - (es / e)
             # Drop invalid PSDs; if you prefer to treat them as 0, replace next line with:
@@ -361,6 +369,8 @@ def extract_window_waveforms(root_path: str,
             mask &= m
             dbg["psd_keep"] = int(np.logical_and(mask_time, m).sum())
         else:
+            # If PSD is requested but can't be computed (e.g., EnergyShort missing),
+            # ignore the PSD cut rather than dropping all waveforms.
             dbg["psd_keep"] = dbg["time_match"]
 
         if have_energy and (filt.get("e_lo") is not None or filt.get("e_hi") is not None):
@@ -396,11 +406,17 @@ def extract_window_waveforms(root_path: str,
             if have_energy:
                 try:
                     Ei  = float(e[i])
-                    Esi = float(es[i])
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        P = float(1.0 - (Esi / Ei)) if Ei else None
-                    if not np.isfinite(P):
-                        P = None
+                    if not np.isfinite(Ei):
+                        Ei = None
+                    if have_energy_short:
+                        Esi = float(es[i])
+                        if not np.isfinite(Esi):
+                            Esi = None
+                    if Ei is not None and Esi is not None:
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            P = float(1.0 - (Esi / Ei)) if Ei else None
+                        if not np.isfinite(P):
+                            P = None
                 except Exception:
                     pass
 
@@ -634,16 +650,24 @@ def extract_window_fullsamples(root_path: str,
         if dbg["time_match"] == 0:
             return out, dbg, 0
 
-        have_energy = (BR_ENERGY in t.keys()) and (BR_ENERGY_SHORT in t.keys())
+        have_energy = (BR_ENERGY in t.keys())
+        have_energy_short = (BR_ENERGY_SHORT in t.keys())
         e = es = None
         if have_energy:
-            # Always load energy branches so they can be returned in JSON even when
+            # Always load Energy so it can be returned in JSON even when
             # no filter is provided.
-            e  = t[BR_ENERGY].array(library="np")
+            e = t[BR_ENERGY].array(library="np")
+        if have_energy_short:
+            # Load EnergyShort if available (needed for PSD display/filtering).
             es = t[BR_ENERGY_SHORT].array(library="np")
         mask = mask_time
 
-        if have_energy and (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None):
+        want_psd = (filt.get("psd_lo") is not None or filt.get("psd_hi") is not None)
+        psd_available = bool(have_energy and have_energy_short)
+        dbg["psd_available"] = psd_available
+        dbg["psd_applied"] = bool(want_psd and psd_available)
+
+        if want_psd and psd_available:
             with np.errstate(divide="ignore", invalid="ignore"):
                 psd = 1.0 - (es / e)
             m = np.isfinite(psd)
@@ -685,12 +709,17 @@ def extract_window_fullsamples(root_path: str,
             if have_energy:
                 try:
                     Ei  = float(e[i])
-                    Esi = float(es[i])
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        P = float(1.0 - (Esi / Ei)) if Ei else None
-                    if not np.isfinite(P): P = None
-                    if not np.isfinite(Ei): Ei = None
-                    if not np.isfinite(Esi): Esi = None
+                    if not np.isfinite(Ei):
+                        Ei = None
+                    if have_energy_short:
+                        Esi = float(es[i])
+                        if not np.isfinite(Esi):
+                            Esi = None
+                    if Ei is not None and Esi is not None:
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            P = float(1.0 - (Esi / Ei)) if Ei else None
+                        if not np.isfinite(P):
+                            P = None
                 except Exception:
                     Ei = Esi = P = None
 
