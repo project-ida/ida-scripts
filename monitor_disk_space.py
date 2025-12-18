@@ -24,7 +24,7 @@ Usage:
     python   monitor_disk_space.py -t 12 -p C:\
 
 Example (Linux cron entry):
-    */10 * * * * /usr/bin/python3 /path/monitor_disk_space.py --threshold 10
+    0 */1 * * * /usr/bin/python3 /home/cf/ida-scripts/monitor_disk_space.py -t 10 -q
 
 Example (Windows Task Scheduler):
     Program: C:\Path\To\Python.exe
