@@ -43,7 +43,7 @@ set -euo pipefail
 #   - pg_dumpall
 #   - pv
 #   - pigz
-#   - rclone (configured, e.g. to googledrive:postgres_backup)
+#   - rclone (configured, e.g. to synology:backups/postgres_backup)
 # -------------------------------------------------------------------
 
 BACKUP_ROOT="${1:-$HOME}"
@@ -55,7 +55,7 @@ DUMP_NAME="all_databases_${TIMESTAMP}.sql"
 DUMP_PATH="$BACKUP_DIR/$DUMP_NAME"
 GZ_PATH="${DUMP_PATH}.gz"
 LOGFILE="$HOME/backup_log.txt"
-RCLONE_REMOTE="googledrive:postgres_backup"
+RCLONE_REMOTE="synology:backups/postgres_backup"
 LOG_MAX_MB=10
 
 mkdir -p "$BACKUP_DIR"

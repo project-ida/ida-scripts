@@ -33,10 +33,10 @@ set -euo pipefail
 #   - tar    (to create the archive)
 #   - pv     (to monitor progress during compression)
 #   - pigz   (parallel gzip compression)
-#   - rclone (configured with the remote googledrive)
+#   - rclone (configured with the remote synology)
 #
 # Remote:
-#   By default, uploads to the rclone remote "googledrive:panels_backup"
+#   By default, uploads to the rclone remote "synology:backups/panels_backup"
 #   To change, edit the RCLONE_REMOTE variable in the script
 # -------------------------------------------------------------------
 
@@ -58,7 +58,7 @@ ARCHIVE_NAME="$(basename "$SOURCE_DIR")_${TIMESTAMP}.tar"
 ARCHIVE_PATH="$BACKUP_DIR/$ARCHIVE_NAME"
 GZ_PATH="${ARCHIVE_PATH}.gz"
 
-RCLONE_REMOTE="googledrive:panels_backup"
+RCLONE_REMOTE="synology:backups/panels_backup"
 LOG_MAX_MB=10
 
 mkdir -p "$BACKUP_DIR" "$LOG_DIR"
