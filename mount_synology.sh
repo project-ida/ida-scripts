@@ -17,6 +17,11 @@
 #   - rclone installed and configured (e.g., run 'rclone config' to set up your Synology remote).
 #   - FUSE installed (e.g., 'sudo apt install fuse3' on Debian-based systems).
 #   - Add 'user_allow_other' to /etc/fuse.conf for --allow-other to work (one-time: 'echo "user_allow_other" | sudo tee /etc/fuse.conf').
+#   - If mounting under /mnt as a non-root user, create and assign the mountpoint once:
+#       sudo mkdir -p /mnt/synology/Computers
+#       sudo chown "$USER:$USER" /mnt/synology/Computers
+#       # if needed:
+#       sudo chown "$USER:$USER" /mnt/synology
 #
 # Customization:
 #   - Adjust cache options in the rclone mount command below as needed (e.g., --vfs-cache-max-size).
