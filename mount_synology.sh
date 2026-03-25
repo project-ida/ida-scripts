@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ===== Google Drive Mount  =====
+# ===== Synology Drive Mount  =====
 #
 # Description:
 # This script mounts a Synology Drive remote (via rclone) to a local directory using FUSE.
@@ -82,4 +82,4 @@ chown "${CURRENT_USER}:${CURRENT_USER}" "${MOUNTPOINT}"
   --log-file "${LOG_FILE}"
 
 # If mount fails (rclone exits), notify user
-notify-send "Google Drive Mount Failed" "Check journalctl or ${LOG_FILE} for details" -u critical
+notify-send "Synology Mount Failed" "Check journalctl or ${LOG_FILE} for details" -u critical
