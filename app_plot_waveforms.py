@@ -48,7 +48,7 @@ PGDATABASE         = psql_credentials.PGDATABASE
 CONNECTION_URI = f"postgresql+psycopg2://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
 engine = create_engine(CONNECTION_URI, pool_pre_ping=True, future=True)
 
-ROOT_BASE_DIR = "/mnt/gdrive/Computers"  # adjust if needed
+ROOT_BASE_DIR = "/mnt/synology/Computers"  # adjust if needed
 
 DEFAULT_INDEX_TABLE = "root_files"
 COL_TIME, COL_COMPUTER, COL_DIR, COL_FILE, COL_DEVICE = "time", "computer", "dir", "file", "device"
