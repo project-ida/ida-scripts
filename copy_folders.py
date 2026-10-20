@@ -93,13 +93,29 @@ def copy_folder(source_path, dest_path, include_exts=None):
             # Base rclone command
             cmd = [
                 "rclone", "copy",
-                "-v",
-                "--stats=5s",
+                "--transfers", "1",
+                "--checkers", "2",
+                "--multi-thread-streams", "0",
+                "--bwlimit", "10M",
+                "--buffer-size", "4M",
+                "--stats", "60s",
                 "--stats-one-line",
-                "--retries", "10",
-                "--timeout", "30s",
-                "--ignore-checksum",
+                "--stats-log-level", "NOTICE",
+                "--retries", "2",
+                "--low-level-retries", "2",
+                "--timeout", "2m",
             ]
+
+            # Faster, uses more resources and makes lots more verbose
+            # cmd = [
+            #     "rclone", "copy",
+            #     "-v",
+            #     "--stats=5s",
+            #     "--stats-one-line",
+            #     "--retries", "10",
+            #     "--timeout", "30s",
+            #     "--ignore-checksum",
+            # ]
 
             # Add include filters if needed
             for ext in include_exts:
